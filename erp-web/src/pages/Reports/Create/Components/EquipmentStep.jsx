@@ -2,7 +2,7 @@
 import { css } from "@emotion/react";
 import { useMemo, useState, Fragment } from "react";
 import AHUForm from "../../../../features/report/AHUForm";
-import { EQUIP_TYPES } from "../../../../domain/equipment/registry";
+import { EQUIP_TYPES, getSchema } from "../../../../domain/equipment/registry";
 
 /* styles */
 const card = css`
@@ -132,10 +132,17 @@ const input = css`
 
 /* helpers */
 const blankDetail = () => ({
+  // ✅ 새 표준 키
+  equipName: "", // 설비명(호기별)
+  purpose: "", // 용도
+
+  engineer: "", // 점검자
+  dateTxt: "", // 점검일자(표시용 문자열)
+  location: "", // 설치위치
+
+  // ✅ 레거시 호환(남아있어도 깨지지 않게)
   model: "",
-  engineer: "", // ✅ 점검자
-  dateTxt: "",  // ✅ 점검일자(표시용 문자열: 2026.01.07 등)
-  location: "", // ✅ 설치위치
+  use: "",
 });
 
 const normalizeRow = (row, type) => ({
@@ -146,58 +153,102 @@ const normalizeRow = (row, type) => ({
   details: Array.isArray(row?.details) ? row.details : [],
 });
 
-const normalizeList = (list = []) =>
-  EQUIP_TYPES.map((t) => {
-    const found = (list || []).find((r) => r.key === t.key);
-    return normalizeRow(found, t);
-  });
+/**
+ * ✅ 핵심 수정:
+ * - 장비 목록이 안 뜨는 이유의 대부분은 EQUIP_TYPES가 비었기 때문
+ * - EQUIP_TYPES가 비면 getSchema 기반으로 fallback 목록을 만든다.
+ */
+const FALLBACK_KEYS = [
+  "airComp",
+  "packageAc",
+  "pumpChw",
+  "coolTower",
+  "heatEx",
+  "pipe",
+  "coldHot",
+  "vent",
+  "sanitaryFixture",
+  "fcu",
+  // 필요하면 여기 추가
+];
+
+function buildTypesSafe() {
+  const has = Array.isArray(EQUIP_TYPES) && EQUIP_TYPES.length > 0;
+  if (has) return EQUIP_TYPES;
+
+  const out = [];
+  for (const key of FALLBACK_KEYS) {
+    const s = typeof getSchema === "function" ? getSchema(key) : null;
+    if (s?.key) out.push({ key: s.key, label: s.label || s.key });
+    else out.push({ key, label: key });
+  }
+  return out;
+}
+
+function normalizeDetail(value) {
+  const v = { ...blankDetail(), ...(value || {}) };
+
+  // ✅ 레거시 -> 신규 키 마이그레이션
+  if (!v.equipName && v.model) v.equipName = v.model;
+  if (!v.purpose && v.use) v.purpose = v.use;
+
+  return v;
+}
 
 function resizeDetails(arr = [], nextLen) {
   const next = Array.isArray(arr) ? arr.slice(0, nextLen) : [];
   while (next.length < nextLen) next.push(blankDetail());
-  return next.map((x) => ({
-    ...blankDetail(),
-    ...(x || {}),
-  }));
+  return next.map((x) => normalizeDetail(x));
 }
 
 function DetailEditor({ eqKey, value, onChange }) {
   // ✅ AHU는 전용 폼(기존 유지)
   if (eqKey === "airComp") return <AHUForm value={value} onChange={onChange} />;
 
-  // ✅ 나머지 설비: 공통 상세 입력
-  const v = { ...blankDetail(), ...(value || {}) };
+  const v = normalizeDetail(value);
 
   return (
     <div css={rowGrid2}>
       <div css={rowGrid}>
         <input
           css={input}
-          placeholder="모델명"
-          value={v.model}
-          onChange={(e) => onChange({ ...v, model: e.target.value })}
+          placeholder="설비명 (예: 패키지 에어컨 1호기)"
+          value={v.equipName}
+          onChange={(e) => onChange(normalizeDetail({ ...v, equipName: e.target.value }))}
         />
+
         <input
           css={input}
           placeholder="점검자"
           value={v.engineer}
-          onChange={(e) => onChange({ ...v, engineer: e.target.value })}
+          onChange={(e) => onChange(normalizeDetail({ ...v, engineer: e.target.value }))}
         />
+
         <input
           css={input}
           placeholder="점검일자 (예: 2026.01.07)"
           value={v.dateTxt}
-          onChange={(e) => onChange({ ...v, dateTxt: e.target.value })}
+          onChange={(e) => onChange(normalizeDetail({ ...v, dateTxt: e.target.value }))}
         />
       </div>
 
-      <div>
+      <div css={rowGrid}>
+        <input
+          css={input}
+          placeholder="용도"
+          value={v.purpose}
+          onChange={(e) => onChange(normalizeDetail({ ...v, purpose: e.target.value }))}
+        />
+
         <input
           css={input}
           placeholder="설치위치"
           value={v.location}
-          onChange={(e) => onChange({ ...v, location: e.target.value })}
+          onChange={(e) => onChange(normalizeDetail({ ...v, location: e.target.value }))}
         />
+
+        {/* 3열 맞추기용(모바일에선 1열로 내려감) */}
+        <div />
       </div>
     </div>
   );
@@ -205,17 +256,36 @@ function DetailEditor({ eqKey, value, onChange }) {
 
 /* main */
 export default function EquipmentStep({ equipments, setEquipments }) {
-  const rows = useMemo(() => normalizeList(equipments), [equipments]);
+  const types = useMemo(() => buildTypesSafe(), []);
+  const rows = useMemo(() => {
+    const list = Array.isArray(equipments) ? equipments : [];
+    return types.map((t) => {
+      const found = list.find((r) => r?.key === t.key);
+      return normalizeRow(found, t);
+    });
+  }, [equipments, types]);
+
   const [expanded, setExpanded] = useState(null); // key | null
 
   const patch = (key, patchObj) => {
     setEquipments((prev) => {
-      const base = normalizeList(prev);
-      return base.map((r) => (r.key === key ? { ...r, ...patchObj } : r));
+      const prevList = Array.isArray(prev) ? prev : [];
+      const base = types.map((t) => {
+        const found = prevList.find((r) => r?.key === t.key);
+        return normalizeRow(found, t);
+      });
+
+      const next = base.map((r) => (r.key === key ? { ...r, ...patchObj } : r));
+
+      // ✅ details는 항상 normalize(레거시 키 포함되어도 신규 키로 보정)
+      return next.map((r) =>
+        r.key === key && Array.isArray(r.details)
+          ? { ...r, details: r.details.map((d) => normalizeDetail(d)) }
+          : r
+      );
     });
   };
 
-  // ✅ 보유로 바꾸면 count가 0일 때는 1로 올리고 details도 1칸 만들어줌
   const setOwned = (row, owned) => {
     if (!owned) {
       patch(row.key, { owned: false, count: 0, details: [] });
@@ -337,7 +407,7 @@ export default function EquipmentStep({ equipments, setEquipments }) {
                           items={resizeDetails(row.details, row.count)}
                           onChange={(idx, val) => {
                             const next = resizeDetails(row.details, row.count);
-                            next[idx] = val;
+                            next[idx] = normalizeDetail(val);
                             patch(row.key, { details: next });
                           }}
                         />
@@ -370,6 +440,9 @@ function DetailList({ eqKey, items, onChange }) {
 }
 
 function labelOf(k) {
-  const f = EQUIP_TYPES.find((t) => t.key === k);
-  return f?.label ?? k;
+  const f = Array.isArray(EQUIP_TYPES) ? EQUIP_TYPES.find((t) => t.key === k) : null;
+  if (f?.label) return f.label;
+
+  const s = typeof getSchema === "function" ? getSchema(k) : null;
+  return s?.label ?? k;
 }

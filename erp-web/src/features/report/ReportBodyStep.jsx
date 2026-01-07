@@ -82,12 +82,12 @@ function pickEquipSeed(equipments, meta) {
   const raw = eq?.details?.[(meta?.index || 1) - 1] || null;
   if (!raw) return null;
 
-  // airComp는 AHUForm 구조 자체가 details에 들어갈 수 있으니 그대로 반환
   if (meta?.key === "airComp") return raw;
 
-  // ✅ 공통 seed: 모델명 / 점검자 / 점검일자 / 설치위치
+  // ✅ 신규키(equipName/purpose) 우선 + 레거시(model/use) fallback
   return {
-    model: raw?.model || "",
+    model: raw?.equipName || raw?.model || "",
+    purpose: raw?.purpose || raw?.use || "",
     engineer: raw?.engineer || "",
     dateTxt: raw?.dateTxt || "",
     location: raw?.location || "",

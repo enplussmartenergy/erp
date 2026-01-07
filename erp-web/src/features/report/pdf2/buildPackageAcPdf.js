@@ -33,7 +33,6 @@ async function ensureFonts(doc) {
   doc.addFileToVFS("NotoSansKR-Regular.ttf", _cachedFonts.regular);
   doc.addFileToVFS("NotoSansKR-Bold.ttf", _cachedFonts.bold);
 
-  // ✅ 이 형태는 너 프로젝트에서 계속 쓰던 방식(유지)
   doc.addFont("NotoSansKR-Regular.ttf", "NotoSansKR", "normal", "Identity-H");
   doc.addFont("NotoSansKR-Bold.ttf", "NotoSansKR", "bold", "Identity-H");
 }
@@ -44,13 +43,57 @@ function setKR(doc) {
   doc.setDrawColor(0);
 }
 
-/* ───────────────── 설치위치 resolve (건물명 강제 방지) ───────────────── */
+/* ───────────────── ✅ suffixNo(장비 갯수 번호) resolve ─────────────────
+   목적: “페이지 종류(#1/#2)”가 아니라 “장비 개체 번호(#n)”로 통일
+*/
+function resolveSuffixNo({ reportMeta, report, v }) {
+  // 1) 명시적으로 넘어온 값 우선
+  const direct =
+    reportMeta?.suffixNo ??
+    reportMeta?.equipNo ??
+    reportMeta?.equipIndex ??
+    reportMeta?.index ??
+    v?.meta?.index ??
+    report?.meta?.index;
+
+  const n1 = Number(direct);
+  if (Number.isFinite(n1) && n1 > 0) return Math.floor(n1);
+
+  // 2) 라벨/문자열에서 "#숫자" 파싱
+  const labelCandidates = [
+    reportMeta?.label,
+    reportMeta?.equipLabel,
+    reportMeta?.title,
+    v?.meta?.label,
+    report?.meta?.label,
+  ]
+    .filter(Boolean)
+    .map(String);
+
+  for (const s of labelCandidates) {
+    const m = /#\s*(\d+)/.exec(s);
+    if (m) {
+      const n2 = Number(m[1]);
+      if (Number.isFinite(n2) && n2 > 0) return Math.floor(n2);
+    }
+  }
+
+  return 1;
+}
+
+/* ───────────────── 설치위치 resolve (✅ detail/rated 우선 반영) ───────────────── */
 function resolveInstallLocation({ building, reportMeta, report, v }) {
   const rm = reportMeta || {};
   const r = report || {};
   const meta = r.meta || v?.meta || {};
+  const detail = meta?.detail || {};
+  const rated = v?.rated || {};
 
   const pick =
+    // ✅ 추가(최우선)
+    detail.location ||
+    rated.location ||
+    // 기존
     rm.installLocation ||
     rm.location ||
     rm.place ||
@@ -60,7 +103,7 @@ function resolveInstallLocation({ building, reportMeta, report, v }) {
     (typeof meta.label === "string" ? meta.label : "") ||
     building?.location ||
     building?.address ||
-    ""; // ✅ 마지막 fallback에서도 building.name은 쓰지 않게 (원하면 맨 끝에 building.name 추가 가능)
+    "";
 
   return String(pick || "");
 }
@@ -230,7 +273,6 @@ function footerNo(doc, pageNo) {
   doc.text(String(pageNo), W / 2, H - 10, { align: "center" });
 }
 
-/* ✅ 핵심 수정: autoTable 옵션 병합을 "깊은 병합"으로 (font 안 날아가게) */
 function headBodyTable(doc, opt, styleOverride) {
   const base = {
     styles: {
@@ -263,14 +305,12 @@ function headBodyTable(doc, opt, styleOverride) {
   const finalOpt = {
     ...merged,
     ...opt,
-    // ✅ styles류는 반드시 깊게 합치기 (opt.styles가 font를 덮어쓰지 못하게)
     styles: { ...merged.styles, ...(opt?.styles || {}) },
     headStyles: { ...merged.headStyles, ...(opt?.headStyles || {}) },
     bodyStyles: { ...merged.bodyStyles, ...(opt?.bodyStyles || {}) },
     margin: { left: SAFE.L, right: SAFE.R },
     tableWidth: innerWidth(doc),
     didDrawPage: (data) => {
-      // ✅ 페이지 넘어갈 때도 폰트 유지
       setKR(doc);
       if (typeof opt?.didDrawPage === "function") opt.didDrawPage(data);
     },
@@ -281,16 +321,21 @@ function headBodyTable(doc, opt, styleOverride) {
 
 /* ───────────────── 공통 메타(3컬럼) ───────────────── */
 function renderMeta3(doc, { startY, engineer, dateTxt, installLocation }) {
+  const w = innerWidth(doc);
+  const third = w / 3;
+
   headBodyTable(doc, {
     startY,
     head: [["점검자", "점검일자", "설치위치"]],
     body: [[engineer || "", dateTxt || "", installLocation || ""]],
     columnStyles: {
-      0: { cellWidth: 30 },
-      1: { cellWidth: 30 },
-      2: { cellWidth: innerWidth(doc) - 60 },
+      0: { cellWidth: third },
+      1: { cellWidth: third },
+      2: { cellWidth: third },
     },
-    styles: { fontSize: 9.2, cellPadding: 2.0 },
+    styles: { fontSize: 9.2, cellPadding: 2.0, halign: "center" },
+    headStyles: { halign: "center" },
+    bodyStyles: { halign: "center" },
     pageBreak: "avoid",
   });
 }
@@ -404,7 +449,6 @@ const MOTOR_NOISE_TABLE = [
 function renderChecklistPage(doc, { pageNo, totalPages, dateTxt, installLocation, engineer, suffixNo = 1 }) {
   pageChrome(doc, { title: `패키지 에어컨 성능 점검표 #${suffixNo}`, page: pageNo, total: totalPages });
 
-  // ✅ 메타 3컬럼(폰트 절대 안 깨지게 headBodyTable 수정됨)
   renderMeta3(doc, {
     startY: FRAME.T + 4,
     engineer: engineer || "",
@@ -449,7 +493,6 @@ function renderChecklistPage(doc, { pageNo, totalPages, dateTxt, installLocation
     styles: { fontSize: 9.4, cellPadding: 2.0 },
   });
 
-  // 비고 + 작성방법 (하단 채우기)
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const frameW = W - FRAME.L - FRAME.R;
@@ -567,12 +610,11 @@ function renderCriteriaPage(doc, { pageNo, totalPages, outdoorPhoto, indoorPhoto
 }
 
 /* ───────────────── PAGE5: 결과 수치표(소음 + 전동기소음도만) ───────────────── */
-function renderResultPage(doc, { pageNo, totalPages, meta, installLocation, data, suffixNo = 2 }) {
+function renderResultPage(doc, { pageNo, totalPages, meta, installLocation, data, suffixNo = 1 }) {
   pageChrome(doc, { title: `패키지에어컨 성능 점검 결과 수치표 #${suffixNo}`, page: pageNo, total: totalPages });
 
   const fullW = innerWidth(doc);
 
-  // ✅ PAGE5도 메타 3컬럼으로 통일
   renderMeta3(doc, {
     startY: FRAME.T + 6,
     engineer: meta?.engineer || "",
@@ -639,18 +681,28 @@ export async function renderPackageAc(doc, { building, reportMeta, report, __pag
   const totalPages = __page?.totalPages || 9999;
   let pageNo = __page?.pageNoStart || 1;
 
-  const date = reportMeta?.date ? new Date(reportMeta.date) : null;
-  const dateTxt = date
-    ? `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`
-    : "";
-
-  // ✅ report 포인터 보정
   const v = report?.packageAc ?? report ?? {};
   const noise = v.noise || {};
   const notes = v.notes || {};
   const photoSlots = v.photoSlots || report?.photoSlots || {};
 
-  // ✅ 설치위치(건물명 고정 제거)
+  // ✅ 장비 개체 번호(#n) 결정
+  const suffixNo = resolveSuffixNo({ reportMeta, report, v });
+
+  // ✅ meta/detail/rated 우선으로 점검자/일자 채움 (표 빈칸 방지)
+  const metaDetail = v?.meta?.detail || {};
+  const rated = v?.rated || {};
+
+  const engineer = metaDetail.engineer || rated.engineer || reportMeta?.engineer || "";
+
+  let dateTxt = metaDetail.dateTxt || rated.dateTxt || "";
+  if (!dateTxt) {
+    const date = reportMeta?.date ? new Date(reportMeta.date) : null;
+    dateTxt = date
+      ? `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`
+      : "";
+  }
+
   const installLocation = resolveInstallLocation({ building, reportMeta, report, v });
 
   // PAGE1
@@ -659,8 +711,8 @@ export async function renderPackageAc(doc, { building, reportMeta, report, __pag
     totalPages,
     dateTxt,
     installLocation,
-    engineer: reportMeta?.engineer || "",
-    suffixNo: 1,
+    engineer, // ✅ 수정
+    suffixNo,
   });
 
   // PAGE2
@@ -672,7 +724,7 @@ export async function renderPackageAc(doc, { building, reportMeta, report, __pag
   const outdoorPhoto = await firstPhotoUrlWithFallback(photoSlots, "criteria_outdoor", ["pk_outdoor_status", "criteria_photo"]);
   const indoorPhoto = await firstPhotoUrlWithFallback(photoSlots, "criteria_indoor", ["pk_indoor_status", "criteria_photo"]);
 
-  renderCriteriaPage(doc, { pageNo, totalPages, outdoorPhoto, indoorPhoto, suffixNo: 1 });
+  renderCriteriaPage(doc, { pageNo, totalPages, outdoorPhoto, indoorPhoto, suffixNo });
 
   // PAGE3 (육안)
   pageNo += 1;
@@ -680,7 +732,7 @@ export async function renderPackageAc(doc, { building, reportMeta, report, __pag
   await ensureFonts(doc);
   setKR(doc);
 
-  pageChrome(doc, { title: "패키지에어컨 육안 점검표 #1", page: pageNo, total: totalPages });
+  pageChrome(doc, { title: `패키지에어컨 육안 점검표 #${suffixNo}`, page: pageNo, total: totalPages });
   const visualUrls = await toUrls(PK_VISUAL, photoSlots);
   const visualLines = String(notes.pk_visual_note || "특이사항 없음")
     .split(/\r?\n/)
@@ -696,7 +748,7 @@ export async function renderPackageAc(doc, { building, reportMeta, report, __pag
   await ensureFonts(doc);
   setKR(doc);
 
-  pageChrome(doc, { title: "패키지에어컨 측정 점검표 #1", page: pageNo, total: totalPages });
+  pageChrome(doc, { title: `패키지에어컨 측정 점검표 #${suffixNo}`, page: pageNo, total: totalPages });
   const measureUrls = await toUrls(PK_MEASURE, photoSlots);
   const measureLines = String(notes.pk_measure_note || "특이사항 없음")
     .split(/\r?\n/)
@@ -715,9 +767,9 @@ export async function renderPackageAc(doc, { building, reportMeta, report, __pag
   renderResultPage(doc, {
     pageNo,
     totalPages,
-    meta: { engineer: reportMeta?.engineer || "", dateTxt },
+    meta: { engineer, dateTxt }, // ✅ 수정
     installLocation,
-    suffixNo: 2,
+    suffixNo,
     data: {
       indoorRatedKw: noise.indoorRatedKw ?? "",
       outdoorRatedKw: noise.outdoorRatedKw ?? "",

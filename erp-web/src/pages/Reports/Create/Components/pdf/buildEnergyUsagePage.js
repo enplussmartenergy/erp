@@ -7,6 +7,14 @@ const BLACK = 0;
 const DEFAULT_FRAME = { L: 10, R: 10, T: 20, B: 8 };
 const DEFAULT_SAFE = { L: DEFAULT_FRAME.L + 4, R: DEFAULT_FRAME.R + 4 };
 
+/* =========================
+   ✅ 페이지 안전 유틸 (빈 페이지 방지)
+========================= */
+function gotoLastPage(doc) {
+  const n = doc.getNumberOfPages();
+  doc.setPage(n);
+}
+
 function setKR(doc) {
   doc.setFont("NotoSansKR", "normal");
   doc.setTextColor(BLACK);
@@ -51,7 +59,6 @@ const fmt0 = (n) => (Number.isFinite(+n) ? `${Math.round(+n)}` : "");
 const fmt1 = (n) => (Number.isFinite(+n) ? `${(+n).toFixed(1)}` : "");
 const fmt2 = (n) => (Number.isFinite(+n) ? `${(+n).toFixed(2)}` : "");
 const fmt3 = (n) => (Number.isFinite(+n) ? `${(+n).toFixed(3)}` : "");
-const fmt4 = (n) => (Number.isFinite(+n) ? `${(+n).toFixed(4)}` : "");
 
 const fmtComma = (n) => {
   const v = +n;
@@ -60,9 +67,20 @@ const fmtComma = (n) => {
 const fmtComma2 = (n) => {
   const v = +n;
   return Number.isFinite(v)
-    ? v.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    ? v.toLocaleString("ko-KR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
     : "";
 };
+
+const pct = (base, next) => {
+  const b = +base;
+  const n = +next;
+  if (!Number.isFinite(b) || b === 0 || !Number.isFinite(n)) return null;
+  return ((n - b) / b) * 100;
+};
+const fmtPct = (p) => (p == null ? "—" : `${fmt2(p)} [%]`);
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -73,8 +91,19 @@ function drawBox(doc, x, y, w, h) {
   doc.rect(x, y, w, h, "S");
 }
 
+/* =========================
+   ✅ 컬러(가독성용 / 텍스트는 검정)
+========================= */
+const COLOR = {
+  head: [240, 240, 240],
+  sum: [255, 255, 140],
+  gas: [255, 235, 235],
+  elec: [235, 242, 255],
+  note: [245, 245, 245],
+};
+
 /* ─────────────────────────────────────────────────────────────
-   ✅ 에너지 데이터 resolve
+   ✅ 에너지 데이터 resolve (전기 + 가스)
 ───────────────────────────────────────────────────────────── */
 function resolveEnergy(report, building, baseYearFallback = new Date().getFullYear()) {
   const src =
@@ -143,15 +172,6 @@ function resolveEnergy(report, building, baseYearFallback = new Date().getFullYe
     return { monthlyKwhRaw, monthlyCostRaw, totalKwh, totalWon };
   };
 
-  const e1 = pickElectric(y1raw);
-  const e2 = pickElectric(y2raw);
-
-  const mwh1 = e1.totalKwh ? e1.totalKwh / 1000 : 0;
-  const mwh2 = e2.totalKwh ? e2.totalKwh / 1000 : 0;
-
-  const costM1 = e1.totalWon ? e1.totalWon / 1_000_000 : 0;
-  const costM2 = e2.totalWon ? e2.totalWon / 1_000_000 : 0;
-
   const pickGas = (y) => {
     const g = y?.gas || {};
     const enabled = !!g.enabled;
@@ -165,19 +185,30 @@ function resolveEnergy(report, building, baseYearFallback = new Date().getFullYe
     return { enabled, unitLabel, monthlyUseRaw, monthlyCostRaw, totalUse, totalWon };
   };
 
+  const e1 = pickElectric(y1raw);
+  const e2 = pickElectric(y2raw);
   const g1 = pickGas(y1raw);
   const g2 = pickGas(y2raw);
+
+  const mwh1 = e1.totalKwh ? e1.totalKwh / 1000 : 0;
+  const mwh2 = e2.totalKwh ? e2.totalKwh / 1000 : 0;
+
+  const costM1 = e1.totalWon ? e1.totalWon / 1_000_000 : 0;
+  const costM2 = e2.totalWon ? e2.totalWon / 1_000_000 : 0;
+
+  const gasCostM1 = g1.totalWon ? g1.totalWon / 1_000_000 : 0;
+  const gasCostM2 = g2.totalWon ? g2.totalWon / 1_000_000 : 0;
 
   return {
     baseYear,
     y1,
     y2,
 
+    // 전기
     kwh1: e1.totalKwh,
     kwh2: e2.totalKwh,
     won1: e1.totalWon,
     won2: e2.totalWon,
-
     mwh1,
     mwh2,
     costM1,
@@ -193,8 +224,11 @@ function resolveEnergy(report, building, baseYearFallback = new Date().getFullYe
     monthlyCost1: e1.monthlyCostRaw.map(toNumOr0),
     monthlyCost2: e2.monthlyCostRaw.map(toNumOr0),
 
+    // 가스
     gas1: g1,
     gas2: g2,
+    gasCostM1,
+    gasCostM2,
   };
 }
 
@@ -211,7 +245,6 @@ function resolveAreaM2(building, report) {
     N(report?.buildingAreaM2) ||
     N(report?.areaM2) ||
     0;
-
   return v;
 }
 
@@ -221,16 +254,16 @@ function baseTableStyle() {
     theme: "grid",
     styles: {
       font: "NotoSansKR",
-      fontSize: 9.2,
+      fontSize: 9.0,
       textColor: 0,
       lineColor: 0,
       lineWidth: 0.2,
-      cellPadding: { top: 2.0, right: 2.0, bottom: 2.0, left: 2.0 },
+      cellPadding: { top: 1.8, right: 2.0, bottom: 1.8, left: 2.0 },
       valign: "middle",
       halign: "center",
     },
     headStyles: {
-      fillColor: [235, 235, 235],
+      fillColor: COLOR.head,
       textColor: 0,
       lineColor: 0,
       lineWidth: 0.2,
@@ -240,8 +273,36 @@ function baseTableStyle() {
   };
 }
 
-/* ───────── simple bars ───────── */
-function drawBarPair(doc, { x, y, w, h, title, unitLabel, v1, v2, y1, y2 }) {
+/* ============================================================
+   ✅ 계산용 계수(전기) - 기존 유지(절대 변경 금지)
+============================================================ */
+const GHG_RULES = {
+  tjPerMwh: 0.0096,
+  toePerMwh: 0.229,
+  co2_tPerMwh: 0.5,
+  ch4_kgPerMwh: 0.000125,
+  n2o_kgPerMwh: 0.00001,
+  tco2eqPerMwh: 0.459410593191394,
+};
+
+/* ============================================================
+   ✅ 가스 계산(요청 규칙 그대로)
+============================================================ */
+const GAS_RULES = {
+  toePerNm3: 1.0190,
+  tjPerNm3: 0.0431,
+  // tCO2 = use * 0.0389 * 56100 / 1000
+  tco2_perNm3: (0.0389 * 56100) / 1000,
+  // kgCH4 = use * 0.0389
+  kgch4_perNm3: 0.0389,
+  // kgN2O = use * 0.00389
+  kgn2o_perNm3: 0.00389,
+  // tCO2eq = tCO2 + (kgCH4*21)/1000 + (kgN2O*310)/1000
+  toTco2eq: (tco2, kgch4, kgn2o) => tco2 + (kgch4 * 21) / 1000 + (kgn2o * 310) / 1000,
+};
+
+/* ───────── grouped bar: 2 fuels(가스/전기) x 2 years ───────── */
+function drawGroupedBars2Fuel(doc, { x, y, w, h, title, y1, y2, gas1, elec1, gas2, elec2, unitLabel }) {
   setKR(doc);
   drawBox(doc, x, y, w, h);
 
@@ -249,58 +310,99 @@ function drawBarPair(doc, { x, y, w, h, title, unitLabel, v1, v2, y1, y2 }) {
   doc.setFontSize(11);
   doc.text(title, x + w / 2, y + 10, { align: "center" });
 
-  const pad = 14;
-  const px = x + pad;
-  const py = y + 18;
-  const pw = w - pad * 2;
-  const ph = h - 34;
+  const padL = 16;
+  const padR = 12;
+  const padT = 18;
+  const padB = 18;
 
+  const px = x + padL;
+  const py = y + padT;
+  const pw = w - padL - padR;
+  const ph = h - padT - padB;
+
+  const maxV = Math.max(gas1, elec1, gas2, elec2, 1);
+
+  // 그룹 2개(연도), 각 그룹에 2개 막대(가스/전기)
+  const groupW = pw / 2;
+  const barW = groupW * 0.26;
+  const gap = groupW * 0.10;
+
+  const xG1 = px + groupW * 0.5;
+  const xG2 = px + groupW * 1.5;
+
+  const barH = (v) => (v / maxV) * (ph * 0.78);
+
+  // 축선
   doc.setLineWidth(0.2);
   doc.setDrawColor(0);
   doc.line(px, py + ph, px + pw, py + ph);
 
-  const maxV = Math.max(v1, v2, 1);
-  const barW = pw * 0.22;
-  const gap = pw * 0.22;
-  const b1x = px + gap * 0.7;
-  const b2x = b1x + barW + gap;
+  // 색(배경만 살짝): 가스=연분홍, 전기=연파랑
+  const GAS_FILL = [255, 210, 210];
+  const ELEC_FILL = [210, 225, 255];
 
-  const usableH = ph * 0.78;
-  const b1h = (v1 / maxV) * usableH;
-  const b2h = (v2 / maxV) * usableH;
+  const drawPair = (cx, gasV, elecV) => {
+    const gx = cx - (barW + gap / 2);
+    const ex = cx + gap / 2;
 
-  doc.setFillColor(200);
-  doc.rect(b1x, py + ph - b1h, barW, b1h, "F");
-  doc.setFillColor(140);
-  doc.rect(b2x, py + ph - b2h, barW, b2h, "F");
+    const gh = barH(gasV);
+    const eh = barH(elecV);
 
-  doc.setTextColor(0);
-  doc.setFont("NotoSansKR", "bold");
-  doc.setFontSize(10);
+    doc.setFillColor(...GAS_FILL);
+    doc.rect(gx, py + ph - gh, barW, gh, "F");
 
-  const t1y = clamp(py + ph - b1h + 10, py + 14, py + ph - 6);
-  const t2y = clamp(py + ph - b2h + 10, py + 14, py + ph - 6);
+    doc.setFillColor(...ELEC_FILL);
+    doc.rect(ex, py + ph - eh, barW, eh, "F");
 
-  doc.text(fmt0(v1), b1x + barW / 2, t1y, { align: "center" });
-  doc.text(fmt0(v2), b2x + barW / 2, t2y, { align: "center" });
+    doc.setTextColor(0);
+    doc.setFont("NotoSansKR", "bold");
+    doc.setFontSize(9);
+
+    doc.text(fmtComma2(gasV), gx + barW / 2, clamp(py + ph - gh + 9, py + 14, py + ph - 3), {
+      align: "center",
+    });
+    doc.text(fmtComma2(elecV), ex + barW / 2, clamp(py + ph - eh + 9, py + 14, py + ph - 3), {
+      align: "center",
+    });
+  };
+
+  drawPair(xG1, gas1, elec1);
+  drawPair(xG2, gas2, elec2);
 
   doc.setFont("NotoSansKR", "normal");
   doc.setFontSize(9);
-  doc.text(`${y1}년`, b1x + barW / 2, py + ph + 10, { align: "center" });
-  doc.text(`${y2}년`, b2x + barW / 2, py + ph + 10, { align: "center" });
+  doc.text(`${y1}년`, xG1, py + ph + 10, { align: "center" });
+  doc.text(`${y2}년`, xG2, py + ph + 10, { align: "center" });
+
+  // legend
+  const ly = y + h - 8;
+  doc.setFillColor(255, 210, 210);
+  doc.rect(x + 14, ly - 3, 7, 3, "F");
+  doc.setTextColor(0);
+  doc.text("도시가스(LNG)", x + 24, ly);
+
+  doc.setFillColor(210, 225, 255);
+  doc.rect(x + 84, ly - 3, 7, 3, "F");
+  doc.text("전력", x + 94, ly);
 
   doc.setFontSize(9);
   doc.text(unitLabel || "", x + w - 8, y + 12, { align: "right" });
 }
 
 /* ───────── 월별 라인 차트 (2년) ───────── */
-function drawMonthlyLineChart2(doc, { x, y, w, h, title, y1, y2, v1, v2 }) {
+function drawMonthlyLineChart2(doc, { x, y, w, h, title, y1, y2, v1, v2, unitLabel = "" }) {
   setKR(doc);
   drawBox(doc, x, y, w, h);
 
   doc.setFont("NotoSansKR", "bold");
   doc.setFontSize(11);
   doc.text(title, x + w / 2, y + 10, { align: "center" });
+
+  if (unitLabel) {
+    doc.setFont("NotoSansKR", "normal");
+    doc.setFontSize(9);
+    doc.text(`[${unitLabel}]`, x + 10, y + 13);
+  }
 
   const padL = 28;
   const padR = 10;
@@ -409,8 +511,11 @@ function drawMonthlyLineChart2(doc, { x, y, w, h, title, y1, y2, v1, v2 }) {
   doc.setTextColor(0);
 }
 
-/* ───────── 원단위 콤보 차트 (막대 + 선) ───────── */
-function drawUnitComboChart(doc, { x, y, w, h, title, bar1, bar2, line1, line2, y1, y2 }) {
+/* ───────── 원단위(막대+선) 콤보 차트 (2년 비교) ─────────
+   - bar: 단위사용량(좌축)
+   - line: 원단위(우축)
+*/
+function drawUnitComboChart2Years(doc, { x, y, w, h, title, y1, y2, barUnit, lineUnit, bar1, bar2, line1, line2 }) {
   setKR(doc);
   drawBox(doc, x, y, w, h);
 
@@ -418,93 +523,99 @@ function drawUnitComboChart(doc, { x, y, w, h, title, bar1, bar2, line1, line2, 
   doc.setFontSize(11);
   doc.text(title, x + w / 2, y + 10, { align: "center" });
 
-  const pad = 14;
-  const px = x + pad;
-  const py = y + 18;
-  const pw = w - pad * 2;
-  const ph = h - 34;
+  doc.setFont("NotoSansKR", "normal");
+  doc.setFontSize(8.8);
+  doc.text(`[${barUnit}]`, x + 8, y + 13);
+  doc.text(`[${lineUnit}]`, x + w - 8, y + 13, { align: "right" });
 
-  doc.setLineWidth(0.2);
-  doc.setDrawColor(0);
-  doc.line(px, py + ph, px + pw, py + ph);
+  const padL = 22;
+  const padR = 22;
+  const padT = 18;
+  const padB = 18;
+
+  const px = x + padL;
+  const py = y + padT;
+  const pw = w - padL - padR;
+  const ph = h - padT - padB;
 
   const maxBar = Math.max(bar1, bar2, 1);
-  const barW = pw * 0.22;
-  const gap = pw * 0.26;
-  const b1x = px + gap * 0.8;
-  const b2x = b1x + barW + gap;
-
-  const usableH = ph * 0.78;
-  const b1h = (bar1 / maxBar) * usableH;
-  const b2h = (bar2 / maxBar) * usableH;
-
-  doc.setFillColor(180);
-  doc.rect(b1x, py + ph - b1h, barW, b1h, "F");
-  doc.setFillColor(120);
-  doc.rect(b2x, py + ph - b2h, barW, b2h, "F");
-
   const maxLine = Math.max(line1, line2, 1);
-  const toLineY = (v) => py + ph - (v / maxLine) * (ph * 0.76);
-  const p1x = b1x + barW / 2;
-  const p2x = b2x + barW / 2;
-  const p1y = toLineY(line1);
-  const p2y = toLineY(line2);
 
+  // 축/그리드
+  doc.setLineWidth(0.2);
+  doc.setDrawColor(210);
+  for (let t = 0; t <= 4; t++) {
+    const yy = py + (ph * t) / 4;
+    doc.line(px, yy, px + pw, yy);
+  }
   doc.setDrawColor(0);
-  doc.setLineWidth(0.35);
-  doc.line(p1x, p1y, p2x, p2y);
+  doc.line(px, py, px, py + ph);
+  doc.line(px, py + ph, px + pw, py + ph);
 
-  doc.setFillColor(0);
-  doc.circle(p1x, p1y, 1.1, "F");
-  doc.circle(p2x, p2y, 1.1, "F");
+  // bar 2개 (연도)
+  const barW = pw * 0.18;
+  const gap = pw * 0.18;
+  const cx1 = px + pw * 0.33;
+  const cx2 = px + pw * 0.67;
 
-  doc.setFont("NotoSansKR", "bold");
-  doc.setFontSize(10);
+  const bh = (v) => (v / maxBar) * (ph * 0.85);
+  const ly = (v) => py + ph - (v / maxLine) * (ph * 0.85);
+
+  // bar fill (살짝 컬러)
+  doc.setFillColor(255, 120, 120); // red-ish
+  doc.rect(cx1 - barW / 2, py + ph - bh(bar1), barW, bh(bar1), "F");
+  doc.rect(cx2 - barW / 2, py + ph - bh(bar2), barW, bh(bar2), "F");
+
+  // line (navy-ish)
+  doc.setDrawColor(20, 40, 90);
+  doc.setLineWidth(0.6);
+  doc.line(cx1, ly(line1), cx2, ly(line2));
+  doc.setFillColor(20, 40, 90);
+  doc.circle(cx1, ly(line1), 1.2, "F");
+  doc.circle(cx2, ly(line2), 1.2, "F");
+
+  // labels
   doc.setTextColor(0);
-
-  doc.text(fmt2(bar1), b1x + barW / 2, clamp(py + ph - b1h + 10, py + 14, py + ph - 6), {
-    align: "center",
-  });
-  doc.text(fmt2(bar2), b2x + barW / 2, clamp(py + ph - b2h + 10, py + 14, py + ph - 6), {
-    align: "center",
-  });
-
   doc.setFont("NotoSansKR", "normal");
   doc.setFontSize(9);
-  doc.text(fmtComma2(line1), p1x, p1y - 6, { align: "center" });
-  doc.text(fmtComma2(line2), p2x, p2y - 6, { align: "center" });
+  doc.text(`${y1}`, cx1, y + h - 8, { align: "center" });
+  doc.text(`${y2}`, cx2, y + h - 8, { align: "center" });
 
-  doc.text(`${y1}년`, b1x + barW / 2, py + ph + 10, { align: "center" });
-  doc.text(`${y2}년`, b2x + barW / 2, py + ph + 10, { align: "center" });
+  doc.setFont("NotoSansKR", "bold");
+  doc.setFontSize(8.8);
+  doc.text(fmt2(bar1), cx1, clamp(py + ph - bh(bar1) + 9, py + 14, py + ph - 3), { align: "center" });
+  doc.text(fmt2(bar2), cx2, clamp(py + ph - bh(bar2) + 9, py + 14, py + ph - 3), { align: "center" });
 
-  doc.setFillColor(180);
-  doc.rect(x + 10, y + h - 10, 6, 3, "F");
-  doc.text("[kWh/㎡] (막대)", x + 18, y + h - 7);
+  doc.setFont("NotoSansKR", "normal");
+  doc.text(fmtComma2(line1), cx1, clamp(ly(line1) - 3, py + 10, py + ph - 10), { align: "center" });
+  doc.text(fmtComma2(line2), cx2, clamp(ly(line2) - 3, py + 10, py + ph - 10), { align: "center" });
 
-  doc.setFillColor(0);
-  doc.rect(x + 78, y + h - 10, 6, 3, "F");
-  doc.text("[원/㎡] (선)", x + 86, y + h - 7);
+  // legend
+  const legY = y + h - 4;
+  doc.setFillColor(255, 120, 120);
+  doc.rect(x + 10, legY - 3, 7, 3, "F");
+  doc.setTextColor(0);
+  doc.setFontSize(8.8);
+  doc.text("단위사용량", x + 20, legY);
+
+  doc.setDrawColor(20, 40, 90);
+  doc.setLineWidth(0.6);
+  doc.line(x + 68, legY - 1.5, x + 82, legY - 1.5);
+  doc.setFillColor(20, 40, 90);
+  doc.circle(x + 75, legY - 1.5, 1.0, "F");
+  doc.setTextColor(0);
+  doc.text("원단위", x + 86, legY);
 }
 
 /* ============================================================
-   ✅ 계산용 계수(절대 변경 금지)
+   ✅ 1페이지: 라. 에너지 사용 현황 (가스+전기)
 ============================================================ */
-const GHG_RULES = {
-  tjPerMwh: 0.0096,
-  toePerMwh: 0.229,
-  co2_tPerMwh: 0.5,
-  ch4_kgPerMwh: 0.000125,
-  n2o_kgPerMwh: 0.00001,
-  tco2eqPerMwh: 0.459410593191394,
-};
-
-/* ─────────────────────────────────────────────────────────────
-   ✅ 1페이지
-───────────────────────────────────────────────────────────── */
 export function renderEnergyUsagePage(
   doc,
   { building, report, pageNo = 1, totalPages = 1, titleSuffix = "", __layout } = {},
 ) {
+  gotoLastPage(doc);
+
   const frame = __layout?.FRAME || DEFAULT_FRAME;
   const safe = __layout?.SAFE || DEFAULT_SAFE;
 
@@ -524,7 +635,23 @@ export function renderEnergyUsagePage(
   const e = resolveEnergy(report, building, new Date().getFullYear());
   const base = baseTableStyle();
 
-  const incMwh = e.mwh1 > 0 ? ((e.mwh2 - e.mwh1) / e.mwh1) * 100 : null;
+  // 전기 toe
+  const elecToe1 = e.mwh1 * GHG_RULES.toePerMwh;
+  const elecToe2 = e.mwh2 * GHG_RULES.toePerMwh;
+
+  // 가스 toe (요청)
+  const gasUse1 = e.gas1?.enabled ? e.gas1.totalUse : 0;
+  const gasUse2 = e.gas2?.enabled ? e.gas2.totalUse : 0;
+  const gasToe1 = gasUse1 * GAS_RULES.toePerNm3;
+  const gasToe2 = gasUse2 * GAS_RULES.toePerNm3;
+
+  const sumToe1 = elecToe1 + gasToe1;
+  const sumToe2 = elecToe2 + gasToe2;
+
+  const sumCostM1 = e.costM1 + (e.gas1?.enabled ? e.gasCostM1 : 0);
+  const sumCostM2 = e.costM2 + (e.gas2?.enabled ? e.gasCostM2 : 0);
+
+  const incSumToe = pct(sumToe1, sumToe2);
 
   let y = frame.T + 10;
 
@@ -533,115 +660,166 @@ export function renderEnergyUsagePage(
   doc.text("1) 최근 2년간 에너지 사용 현황", left + 1.5, y);
   y += 4;
 
+  const hasGas = !!(e.gas1?.enabled || e.gas2?.enabled);
+
+  // ✅ 표: 가스+전기 모두
+  const bodyRows = [];
+
+  if (hasGas) {
+    bodyRows.push(
+      [
+        { content: "연료" },
+        { content: "도시가스(LNG)", styles: { fillColor: COLOR.gas } },
+        { content: "천Nm3/년" },
+        { content: fmt2(gasUse1 / 1000) },
+        { content: fmtComma(e.gasCostM1), rowSpan: 2 },
+        { content: fmt2(gasUse2 / 1000) },
+        { content: fmtComma(e.gasCostM2), rowSpan: 2 },
+      ],
+      [
+        { content: "연료" },
+        { content: "도시가스(LNG)", styles: { fillColor: COLOR.gas } },
+        { content: "toe/년" },
+        { content: fmt2(gasToe1) },
+        null,
+        { content: fmt2(gasToe2) },
+        null,
+      ],
+    );
+  }
+
+  bodyRows.push(
+    [
+      { content: "전력" },
+      { content: "수전", styles: { fillColor: COLOR.elec } },
+      { content: "MWh/년" },
+      { content: fmtComma(e.mwh1) },
+      { content: fmtComma(e.costM1), rowSpan: 2 },
+      { content: fmtComma(e.mwh2) },
+      { content: fmtComma(e.costM2), rowSpan: 2 },
+    ],
+    [
+      { content: "전력" },
+      { content: "수전", styles: { fillColor: COLOR.elec } },
+      { content: "toe/년" },
+      { content: fmt2(elecToe1) },
+      null,
+      { content: fmt2(elecToe2) },
+      null,
+    ],
+    [
+      { content: "합계", styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+      { content: "", styles: { fillColor: COLOR.sum } },
+      { content: "toe/년", styles: { fillColor: COLOR.sum } },
+      { content: fmt2(sumToe1), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+      { content: fmtComma(sumCostM1), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+      { content: fmt2(sumToe2), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+      { content: fmtComma(sumCostM2), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+    ],
+  );
+
   autoTable(doc, {
     ...base,
     startY: y + 2,
     margin: { left: safe.L, right: safe.R },
     tableWidth: width,
+    pageBreak: "avoid",
+    rowPageBreak: "avoid",
     head: [
       [
         { content: "구분", rowSpan: 2 },
+        { content: "세부", rowSpan: 2 },
         { content: "단위", rowSpan: 2 },
         { content: `${e.y1}`, colSpan: 2 },
         { content: `${e.y2}`, colSpan: 2 },
       ],
       ["사용량", "비용 [백만원]", "사용량", "비용 [백만원]"],
     ],
-    body: [
-      [
-        { content: "전력 / 수전" },
-        { content: "MWh/년" },
-        { content: fmtComma(e.mwh1) },
-        { content: fmtComma(e.costM1), rowSpan: 2 },
-        { content: fmtComma(e.mwh2) },
-        { content: fmtComma(e.costM2), rowSpan: 2 },
-      ],
-      [
-        { content: "전력 / 수전" },
-        { content: "toe/년" },
-        { content: fmt2(e.mwh1 * GHG_RULES.toePerMwh) },
-        null,
-        { content: fmt2(e.mwh2 * GHG_RULES.toePerMwh) },
-        null,
-      ],
-    ],
-    columnStyles: {
-      0: { cellWidth: width * 0.18, halign: "center" },
-      1: { cellWidth: width * 0.12, halign: "center" },
-      2: { cellWidth: width * 0.17, halign: "center" },
-      3: { cellWidth: width * 0.16, halign: "center" },
-      4: { cellWidth: width * 0.17, halign: "center" },
-      5: { cellWidth: width * 0.20, halign: "center" },
-    },
+    body: bodyRows,
     didParseCell: (data) => {
       if (data.section !== "body") return;
       if (data.cell.raw == null) data.cell.text = [""];
     },
+    // ✅ 깨짐 방지: 열 폭 고정(합=width)
+    columnStyles: {
+      0: { cellWidth: width * 0.14 },
+      1: { cellWidth: width * 0.16 },
+      2: { cellWidth: width * 0.12 },
+      3: { cellWidth: width * 0.18 },
+      4: { cellWidth: width * 0.20 },
+      5: { cellWidth: width * 0.18 },
+      6: { cellWidth: width * 0.20 },
+    },
+    styles: { ...base.styles, fontSize: 8.7 },
   });
 
-  y = doc.lastAutoTable.finalY + 10;
+  y = doc.lastAutoTable.finalY + 6;
 
+  // ✅ 차트(한 페이지에 무조건 들어오게 높이 축소)
   const boxW = (width - 10) / 2;
-  const boxH = 70;
+  const boxH = 52;
 
-  drawBarPair(doc, {
+  // (1) toe 차트: 가스/전기 구분
+  drawGroupedBars2Fuel(doc, {
     x: left,
     y,
     w: boxW,
     h: boxH,
-    title: "2년간 전기사용량[toe]",
-    unitLabel: "",
-    v1: e.mwh1 * GHG_RULES.toePerMwh,
-    v2: e.mwh2 * GHG_RULES.toePerMwh,
+    title: "2년간 에너지 사용량 [toe]",
     y1: e.y1,
     y2: e.y2,
+    gas1: gasToe1,
+    elec1: elecToe1,
+    gas2: gasToe2,
+    elec2: elecToe2,
+    unitLabel: "",
   });
 
-  drawBarPair(doc, {
+  // (2) 비용 차트(백만원): 가스/전기 구분
+  drawGroupedBars2Fuel(doc, {
     x: left + boxW + 10,
     y,
     w: boxW,
     h: boxH,
-    title: "2년간 전력 요금[백만원]",
-    unitLabel: "",
-    v1: e.costM1,
-    v2: e.costM2,
+    title: "2년간 에너지 사용금액 [백만원]",
     y1: e.y1,
     y2: e.y2,
+    gas1: e.gas1?.enabled ? e.gasCostM1 : 0,
+    elec1: e.costM1,
+    gas2: e.gas2?.enabled ? e.gasCostM2 : 0,
+    elec2: e.costM2,
+    unitLabel: "",
   });
 
-  y += boxH + 10;
+  y += boxH + 6;
 
   doc.setFont("NotoSansKR", "normal");
-  doc.setFontSize(9.5);
+  doc.setFontSize(9.2);
   doc.text(`※ ${e.y1}년 대비 ${e.y2}년 에너지 사용량 증감율`, left, y);
-  y += 6;
+  y += 5;
 
-  if (incMwh == null) {
-    doc.text("… 전력 [MWh/년] : (입력값 부족) → 증감율 산출 불가", left + 2, y);
-    y += 10;
-  } else {
-    const formula = `… 전력 [MWh/년] : (${fmtComma(e.mwh2)} - ${fmtComma(e.mwh1)}) ÷ ${fmtComma(
-      e.mwh1,
-    )} × 100 = ${fmt2(incMwh)} [%]`;
-    doc.text(formula, left + 2, y);
-    y += 10;
-  }
+  doc.text(
+    `… 합계 [toe/년] : (${fmt2(sumToe2)} - ${fmt2(sumToe1)}) ÷ ${fmt2(sumToe1)} × 100 = ${fmt2(incSumToe ?? 0)} [%]`,
+    left + 2,
+    y,
+  );
+  y += 7;
 
+  // ✅ 하단 요약표 2개(좌: toe, 우: 비용) - 작게
   autoTable(doc, {
     ...base,
     startY: y,
     margin: { left: left, right: W - (left + boxW) },
     tableWidth: boxW,
-    head: [[{ content: "구분", rowSpan: 2 }, { content: "사용량 [toe]", colSpan: 1 }], ["전력"]],
+    pageBreak: "avoid",
+    rowPageBreak: "avoid",
+    head: [[{ content: "구분" }, { content: "사용량 [toe]" }]],
     body: [
-      [`${e.y1}`, fmt2(e.mwh1 * GHG_RULES.toePerMwh)],
-      [`${e.y2}`, fmt2(e.mwh2 * GHG_RULES.toePerMwh)],
+      [`${e.y1}`, fmt2(sumToe1)],
+      [`${e.y2}`, fmt2(sumToe2)],
     ],
-    columnStyles: {
-      0: { cellWidth: boxW * 0.32, halign: "center" },
-      1: { cellWidth: boxW * 0.68, halign: "center" },
-    },
+    styles: { ...base.styles, fontSize: 8.8 },
+    columnStyles: { 0: { cellWidth: boxW * 0.38 }, 1: { cellWidth: boxW * 0.62 } },
   });
 
   autoTable(doc, {
@@ -649,27 +827,29 @@ export function renderEnergyUsagePage(
     startY: y,
     margin: { left: left + boxW + 10, right: safe.R },
     tableWidth: boxW,
-    head: [[{ content: "구분", rowSpan: 2 }, { content: "사용금액 [백만원]", colSpan: 1 }], ["전력"]],
+    pageBreak: "avoid",
+    rowPageBreak: "avoid",
+    head: [[{ content: "구분" }, { content: "사용금액 [백만원]" }]],
     body: [
-      [`${e.y1}`, fmtComma(e.costM1)],
-      [`${e.y2}`, fmtComma(e.costM2)],
+      [`${e.y1}`, fmtComma(sumCostM1)],
+      [`${e.y2}`, fmtComma(sumCostM2)],
     ],
-    columnStyles: {
-      0: { cellWidth: boxW * 0.32, halign: "center" },
-      1: { cellWidth: boxW * 0.68, halign: "center" },
-    },
+    styles: { ...base.styles, fontSize: 8.8 },
+    columnStyles: { 0: { cellWidth: boxW * 0.38 }, 1: { cellWidth: boxW * 0.62 } },
   });
 
   footerNo(doc, pageNo);
 }
 
-/* ─────────────────────────────────────────────────────────────
-   ✅ 2페이지: 라-2/라-3 (계산 로직 유지 + 배출계수 표만 변경)
-───────────────────────────────────────────────────────────── */
+/* ============================================================
+   ✅ 2페이지: 에너지 사용 및 온실가스 배출 (전기+가스)
+============================================================ */
 export function renderEnergyUsageGhGPage(
   doc,
   { building, report, pageNo = 2, totalPages = 1, titleSuffix = "", __layout } = {},
 ) {
+  gotoLastPage(doc);
+
   const frame = __layout?.FRAME || DEFAULT_FRAME;
   const safe = __layout?.SAFE || DEFAULT_SAFE;
 
@@ -691,19 +871,36 @@ export function renderEnergyUsageGhGPage(
 
   const yearLabel = e.y2;
 
+  // 전기(간접)
   const mwh = e.kwh2 > 0 ? e.kwh2 / 1000 : 0;
-  const costM = e.won2 > 0 ? e.won2 / 1_000_000 : e.costM2;
-
-  // ✅ 계산(그대로 유지)
-  const tj = mwh * GHG_RULES.tjPerMwh;
-  const toe = mwh * GHG_RULES.toePerMwh;
-
-  const co2 = mwh * GHG_RULES.co2_tPerMwh;
-  const ch4 = mwh * GHG_RULES.ch4_kgPerMwh;
-  const n2o = mwh * GHG_RULES.n2o_kgPerMwh;
-  const tco2eq = mwh * GHG_RULES.tco2eqPerMwh;
-
+  const costM_e = e.won2 > 0 ? e.won2 / 1_000_000 : e.costM2;
   const unitWonPerKwh = e.kwh2 > 0 ? e.won2 / e.kwh2 : 0;
+
+  const tj_e = mwh * GHG_RULES.tjPerMwh;
+  const toe_e = mwh * GHG_RULES.toePerMwh;
+
+  const co2_e = mwh * GHG_RULES.co2_tPerMwh;
+  const ch4_e = mwh * GHG_RULES.ch4_kgPerMwh;
+  const n2o_e = mwh * GHG_RULES.n2o_kgPerMwh;
+  const tco2eq_e = mwh * GHG_RULES.tco2eqPerMwh;
+
+  // 가스(직접) - 요청 공식
+  const gasUse = e.gas2?.enabled ? e.gas2.totalUse : 0;
+  const costM_g = e.gas2?.enabled ? e.gasCostM2 : 0;
+  const unitWonPerNm3 = gasUse > 0 ? (e.gas2.totalWon || 0) / gasUse : 0;
+
+  const toe_g = gasUse * GAS_RULES.toePerNm3;
+  const tj_g = gasUse * GAS_RULES.tjPerNm3;
+
+  const tco2_g = gasUse * GAS_RULES.tco2_perNm3;
+  const kgch4_g = gasUse * GAS_RULES.kgch4_perNm3;
+  const kgn2o_g = gasUse * GAS_RULES.kgn2o_perNm3;
+  const tco2eq_g = GAS_RULES.toTco2eq(tco2_g, kgch4_g, kgn2o_g);
+
+  // 합계
+  const tj_sum = tj_e + tj_g;
+  const tco2eq_sum = tco2eq_e + tco2eq_g;
+  const costM_sum = costM_e + costM_g;
 
   let curY = frame.T + 10;
 
@@ -712,162 +909,157 @@ export function renderEnergyUsageGhGPage(
   doc.text(`2) ${yearLabel}년 에너지 사용 및 온실가스 배출 현황`, left + 1.5, curY);
   curY += 4;
 
+  const rows = [];
+
+  if (e.gas2?.enabled) {
+    rows.push(
+      [
+        { content: "연료 / 도시가스(LNG)", styles: { fillColor: COLOR.gas } },
+        "천Nm3/년",
+        fmt2(gasUse / 1000),
+        fmtComma(costM_g),
+        `${fmt2(unitWonPerNm3)} [원/Nm3]`,
+      ],
+      ["", "TJ/년", fmt3(tj_g), "", ""],
+    );
+  }
+
+  rows.push(
+    [
+      { content: "전력 / 수전", styles: { fillColor: COLOR.elec } },
+      "MWh/년",
+      fmtComma(mwh),
+      fmtComma(costM_e),
+      `${fmt2(unitWonPerKwh)} [원/kWh]`,
+    ],
+    ["", "TJ/년", fmt3(tj_e), "", ""],
+    [{ content: "합계", styles: { fillColor: COLOR.sum, fontStyle: "bold" } }, "TJ/년", fmt3(tj_sum), fmtComma(costM_sum), "—"],
+    ["온실가스배출량", "tCO2eq/년", fmt1(tco2eq_sum), "—", "—"],
+  );
+
   autoTable(doc, {
     ...base,
     startY: curY + 2,
     margin: { left: safe.L, right: safe.R },
     tableWidth: width,
-    head: [[{ content: "구분" }, { content: "단위" }, { content: "사용량(배출량)" }, { content: "비용[백만원]" }, { content: "연료 단가" }]],
-    body: [
-      [
-        { content: "전력 / 수전" },
-        { content: "MWh/년" },
-        { content: fmtComma(mwh) },
-        { content: fmtComma(costM), rowSpan: 2, styles: { valign: "middle", halign: "center" } },
-        { content: `${fmt2(unitWonPerKwh)} [원/kWh]`, rowSpan: 2, styles: { valign: "middle", halign: "center" } },
-      ],
-      ["", "TJ/년", fmt3(tj), null, null],
-      [{ content: "합계", styles: { fillColor: [255, 255, 140] } }, "TJ/년", fmt3(tj), fmtComma(costM), "—"],
-      ["온실가스배출량", "tCO2eq/년", fmt1(tco2eq), "—", "—"],
-    ],
-    columnStyles: {
-      0: { cellWidth: width * 0.26, halign: "center" },
-      1: { cellWidth: width * 0.14, halign: "center" },
-      2: { cellWidth: width * 0.22, halign: "center" },
-      3: { cellWidth: width * 0.18, halign: "center" },
-      4: { cellWidth: width * 0.20, halign: "center" },
-    },
+    pageBreak: "avoid",
+    rowPageBreak: "avoid",
+    head: [[{ content: "구분" }, { content: "단위" }, { content: "사용량(배출량)" }, { content: "비용[백만원]" }, { content: "현재 연료 단가" }]],
+    body: rows,
     didParseCell: (data) => {
       if (data.section !== "body") return;
       if (data.cell.raw == null) data.cell.text = [""];
     },
+    columnStyles: {
+      0: { cellWidth: width * 0.32 },
+      1: { cellWidth: width * 0.14 },
+      2: { cellWidth: width * 0.20 },
+      3: { cellWidth: width * 0.16 },
+      4: { cellWidth: width * 0.18 },
+    },
+    styles: { ...base.styles, fontSize: 8.8 },
   });
 
-  curY = doc.lastAutoTable.finalY + 8;
+  curY = doc.lastAutoTable.finalY + 6;
 
   // ✅ 계산식 박스(유지)
-  const formulaH = 30;
+  const formulaH = 32;
   drawBox(doc, left, curY, width, formulaH);
   doc.setFont("NotoSansKR", "normal");
-  doc.setFontSize(9);
+  doc.setFontSize(8.8);
 
-  doc.text(`※ TJ/년 = MWh/년 × 0.0096  |  toe/년 = MWh/년 × 0.229`, left + 4, curY + 10);
-  doc.text(`※ CO2 = MWh×0.5000,  CH4 = MWh×0.000125,  N2O = MWh×0.000010`, left + 4, curY + 18);
-  doc.text(`※ tCO2eq(합계) = MWh×0.459410593191394`, left + 4, curY + 26);
+  doc.text(`※ 전기: TJ/년 = MWh/년 × 0.0096  |  toe/년 = MWh/년 × 0.229`, left + 4, curY + 10);
+  doc.text(`※ 가스: toe = 사용량×1.0190  |  TJ/년 = 사용량×0.0431`, left + 4, curY + 18);
+  doc.text(`※ 가스 tCO2eq = tCO2 + (kgCH4×21)/1000 + (kgN2O×310)/1000`, left + 4, curY + 26);
 
-  curY += formulaH + 10;
+  curY += formulaH + 8;
 
   doc.setFont("NotoSansKR", "bold");
   doc.setFontSize(11);
   doc.text(`3) ${yearLabel}년 에너지 사용 및 온실가스 배출량 표기`, left + 1.5, curY);
   curY += 4;
 
+  const tableRows = [];
+  if (e.gas2?.enabled) {
+    tableRows.push([
+      "도시가스(LNG)",
+      fmt2(gasUse / 1000),
+      fmt2(toe_g),
+      fmt3(tj_g),
+      fmt2(tco2_g),
+      fmt2(kgch4_g),
+      fmt2(kgn2o_g),
+      fmt2(tco2eq_g),
+    ]);
+  }
+  tableRows.push([
+    "전 력",
+    fmtComma(mwh),
+    fmt2(toe_e),
+    fmt3(tj_e),
+    fmt1(co2_e),
+    fmt3(ch4_e),
+    fmt3(n2o_e),
+    fmt1(tco2eq_e),
+  ]);
+
+  // 합계행
+  tableRows.push([
+    { content: "합계", styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+    "",
+    { content: fmt2(toe_e + toe_g), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+    { content: fmt3(tj_sum), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+    "",
+    "",
+    "",
+    { content: fmt1(tco2eq_sum), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+  ]);
+
   autoTable(doc, {
     ...base,
     startY: curY + 2,
     margin: { left: safe.L, right: safe.R },
     tableWidth: width,
+    pageBreak: "avoid",
+    rowPageBreak: "avoid",
     head: [
-      [{ content: "연료" }, { content: "에너지 사용량", colSpan: 3 }, { content: "온실가스 배출량", colSpan: 3 }, { content: "합계" }],
-      ["연료", "단위/년[MWh]", "toe/년", "TJ/년", "CO2(tCO2/년)", "CH4(kgCH4/년)", "N2O(kgN2O/년)", "tCO2eq/년"],
+      [
+        { content: "연료명" },
+        { content: "단위/년" },
+        { content: "toe/년" },
+        { content: "TJ/년" },
+        { content: "CO2" },
+        { content: "CH4" },
+        { content: "N2O" },
+        { content: "합계(tCO2eq)" },
+      ],
     ],
-    body: [["전 력", fmtComma(mwh), fmt2(toe), fmt3(tj), fmt1(co2), fmt3(ch4), fmt3(n2o), fmt1(tco2eq)]],
+    body: tableRows,
     columnStyles: {
-      0: { cellWidth: width * 0.10, halign: "center" },
-      1: { cellWidth: width * 0.12, halign: "center" },
-      2: { cellWidth: width * 0.10, halign: "center" },
-      3: { cellWidth: width * 0.10, halign: "center" },
-      4: { cellWidth: width * 0.14, halign: "center" },
-      5: { cellWidth: width * 0.14, halign: "center" },
-      6: { cellWidth: width * 0.14, halign: "center" },
-      7: { cellWidth: width * 0.16, halign: "center" },
+      0: { cellWidth: width * 0.18 },
+      1: { cellWidth: width * 0.12 },
+      2: { cellWidth: width * 0.10 },
+      3: { cellWidth: width * 0.10 },
+      4: { cellWidth: width * 0.12 },
+      5: { cellWidth: width * 0.12 },
+      6: { cellWidth: width * 0.12 },
+      7: { cellWidth: width * 0.14 },
     },
-    styles: { ...base.styles, fontSize: 8.8 },
+    styles: { ...base.styles, fontSize: 8.4 },
   });
-
-  curY = doc.lastAutoTable.finalY + 8;
-
-// ✅ 표시용 값
-const DISPLAY_COEF = {
-  tjPerMwh: 0.0036,
-  co2_tPerMwh: 0.4556,
-  ch4_kgPerMwh: 0.0018,
-  n2o_kgPerMwh: 0.0018,
-};
-
-autoTable(doc, {
-  ...base,
-  startY: curY,
-  margin: { left: safe.L, right: safe.R },
-  tableWidth: width,
-  head: [],
-  body: [
-    // --- 1행 ---
-    [
-      { content: "간접 배출", rowSpan: 5, styles: { fillColor: [235, 235, 235], fontStyle: "bold" } },
-      { content: "전기(소비기준)", rowSpan: 5, styles: { fontStyle: "bold" } },
-      { content: "열량 계수", rowSpan: 2, styles: { fontStyle: "bold" } },
-      { content: "순발열량" },
-      { content: "TJ/MWh" },
-      { content: String(DISPLAY_COEF.tjPerMwh) },
-    ],
-    // --- 2행 (이미 위에서 3칸이 차지함. 나머지 3칸만 작성) ---
-    [
-      { content: "총발열량" },
-      { content: "TJ/MWh" },
-      { content: String(DISPLAY_COEF.tjPerMwh) },
-    ],
-    // --- 3행 (앞 2칸은 rowSpan으로 차지됨. 3번째 칸부터 작성) ---
-    [
-      { content: "온실가스 배출계수", rowSpan: 3, styles: { fontStyle: "bold" } },
-      { content: "CO2" },
-      { content: "tCO2/MWh" },
-      { content: String(DISPLAY_COEF.co2_tPerMwh) },
-    ],
-    // --- 4행 ---
-    [
-      { content: "CH4" },
-      { content: "kgCH4/MWh" },
-      { content: String(DISPLAY_COEF.ch4_kgPerMwh) },
-    ],
-    // --- 5행 ---
-    [
-      { content: "N2O" },
-      { content: "kgN2O/MWh" },
-      { content: String(DISPLAY_COEF.n2o_kgPerMwh) },
-    ],
-  ],
-
-  columnStyles: {
-    0: { cellWidth: width * 0.16 },
-    1: { cellWidth: width * 0.18 },
-    2: { cellWidth: width * 0.20 },
-    3: { cellWidth: width * 0.16 },
-    4: { cellWidth: width * 0.15 },
-    5: { cellWidth: width * 0.15 },
-  },
-
-  styles: { 
-    ...base.styles, 
-    fontSize: 9, 
-    halign: "center", 
-    valign: "middle",
-    textColor: [0, 0, 0],
-    lineWidth: 0.1,
-    lineColor: [0, 0, 0] // 테두리 선명하게
-  },
-});
 
   footerNo(doc, pageNo);
 }
 
-/* ─────────────────────────────────────────────────────────────
-   ✅ 3페이지
-───────────────────────────────────────────────────────────── */
+/* ============================================================
+   ✅ 3페이지: 월별 사용/비용 (전기/가스 둘 다 표시)
+============================================================ */
 export function renderEnergyMonthlyUsageCostPage(
   doc,
   { building, report, pageNo = 3, totalPages = 1, titleSuffix = "", __layout } = {},
 ) {
+  gotoLastPage(doc);
+
   const frame = __layout?.FRAME || DEFAULT_FRAME;
   const safe = __layout?.SAFE || DEFAULT_SAFE;
 
@@ -888,42 +1080,110 @@ export function renderEnergyMonthlyUsageCostPage(
   const base = baseTableStyle();
 
   let y = frame.T + 10;
+
+  // ✅ 가스(있으면) 라인차트
+  if (e.gas1?.enabled || e.gas2?.enabled) {
+    doc.setFont("NotoSansKR", "bold");
+    doc.setFontSize(11);
+    doc.text("1) 도시가스(LNG) 2년간 사용량 추이", left + 1.5, y);
+    y += 4;
+
+    const chartH = 44;
+    drawMonthlyLineChart2(doc, {
+      x: left,
+      y: y + 2,
+      w: width,
+      h: chartH,
+      title: `최근 2년간 LNG(도시가스) 사용량 추이`,
+      y1: e.y1,
+      y2: e.y2,
+      v1: e.gas1.monthlyUseRaw.map((v) => N(v)),
+      v2: e.gas2.monthlyUseRaw.map((v) => N(v)),
+      unitLabel: "Nm³/월",
+    });
+    y += chartH + 8;
+  }
+
+  // ✅ 전기 라인차트
   doc.setFont("NotoSansKR", "bold");
   doc.setFontSize(11);
-  doc.text("1) 전력 2년간 사용량 추이", left + 1.5, y);
+  doc.text("2) 전력 2년간 사용량 추이", left + 1.5, y);
   y += 4;
 
-  const chartH = 52;
-  drawMonthlyLineChart2(doc, {
-    x: left,
-    y: y + 2,
-    w: width,
-    h: chartH,
-    title: `최근 2년간 전력 사용량 추이 [kWh]`,
-    y1: e.y1,
-    y2: e.y2,
-    v1: e.monthlyKwh1,
-    v2: e.monthlyKwh2,
-  });
-  y += chartH + 10;
+  {
+    const chartH = 44;
+    drawMonthlyLineChart2(doc, {
+      x: left,
+      y: y + 2,
+      w: width,
+      h: chartH,
+      title: `최근 2년간 전력 사용량 추이 [kWh]`,
+      y1: e.y1,
+      y2: e.y2,
+      v1: e.monthlyKwh1,
+      v2: e.monthlyKwh2,
+      unitLabel: "kWh/월",
+    });
+    y += chartH + 8;
+  }
 
+  // ✅ 월별 표(가스 + 전기)
   doc.setFont("NotoSansKR", "bold");
   doc.setFontSize(11);
   doc.text("바. 에너지비용 사용현황", left + 1.5, y);
   y += 6;
 
-  doc.setFont("NotoSansKR", "bold");
-  doc.setFontSize(10.5);
-  doc.text("1) 전력 2년간 사용금액", left + 1.5, y);
-  y += 4;
-
   const months = Array.from({ length: 12 }).map((_, i) => `${i + 1}월`);
-
-  const isBlank = (v) => {
-    const s = String(v ?? "").replaceAll(",", "").trim();
-    return s === "";
-  };
+  const isBlank = (v) => String(v ?? "").replaceAll(",", "").trim() === "";
   const cell = (raw) => (isBlank(raw) ? "" : fmtComma(N(raw)));
+
+  // 가스 표
+  if (e.gas1?.enabled || e.gas2?.enabled) {
+    doc.setFontSize(10.5);
+    doc.text("1) 도시가스(LNG) 2년간 사용금액", left + 1.5, y);
+    y += 3;
+
+    autoTable(doc, {
+      ...base,
+      startY: y + 2,
+      margin: { left: safe.L, right: safe.R },
+      tableWidth: width,
+      pageBreak: "avoid",
+      rowPageBreak: "avoid",
+      head: [
+        [
+          { content: "구분", rowSpan: 2 },
+          { content: `${e.y1}년`, colSpan: 2 },
+          { content: `${e.y2}년`, colSpan: 2 },
+        ],
+        ["사용량", "요금(원)", "사용량", "요금(원)"],
+      ],
+      body: [
+        ...months.map((m, i) => [
+          m,
+          cell(e.gas1.monthlyUseRaw?.[i]),
+          cell(e.gas1.monthlyCostRaw?.[i]),
+          cell(e.gas2.monthlyUseRaw?.[i]),
+          cell(e.gas2.monthlyCostRaw?.[i]),
+        ]),
+        [
+          { content: "합계", styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+          { content: cell(e.gas1.totalUse), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+          { content: cell(e.gas1.totalWon), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+          { content: cell(e.gas2.totalUse), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+          { content: cell(e.gas2.totalWon), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+        ],
+      ],
+      styles: { ...base.styles, fontSize: 8.2 },
+    });
+
+    y = doc.lastAutoTable.finalY + 6;
+  }
+
+  // 전기 표
+  doc.setFontSize(10.5);
+  doc.text("2) 전력 2년간 사용금액", left + 1.5, y);
+  y += 3;
 
   const totalKwh1 = e.monthlyKwh1.reduce((a, b) => a + N(b), 0) || e.kwh1;
   const totalKwh2 = e.monthlyKwh2.reduce((a, b) => a + N(b), 0) || e.kwh2;
@@ -935,6 +1195,8 @@ export function renderEnergyMonthlyUsageCostPage(
     startY: y + 2,
     margin: { left: safe.L, right: safe.R },
     tableWidth: width,
+    pageBreak: "avoid",
+    rowPageBreak: "avoid",
     head: [
       [
         { content: "연월", rowSpan: 2 },
@@ -952,33 +1214,28 @@ export function renderEnergyMonthlyUsageCostPage(
         cell(e.monthlyCostRaw2?.[i]),
       ]),
       [
-        { content: "합계", styles: { fillColor: [255, 255, 140], fontStyle: "bold" } },
-        { content: fmtComma(totalKwh1), styles: { fillColor: [255, 255, 140], fontStyle: "bold" } },
-        { content: fmtComma(totalWon1), styles: { fillColor: [255, 255, 140], fontStyle: "bold" } },
-        { content: fmtComma(totalKwh2), styles: { fillColor: [255, 255, 140], fontStyle: "bold" } },
-        { content: fmtComma(totalWon2), styles: { fillColor: [255, 255, 140], fontStyle: "bold" } },
+        { content: "합계", styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+        { content: fmtComma(totalKwh1), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+        { content: fmtComma(totalWon1), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+        { content: fmtComma(totalKwh2), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+        { content: fmtComma(totalWon2), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
       ],
     ],
-    columnStyles: {
-      0: { cellWidth: width * 0.12, halign: "center" },
-      1: { cellWidth: width * 0.22, halign: "center" },
-      2: { cellWidth: width * 0.22, halign: "center" },
-      3: { cellWidth: width * 0.22, halign: "center" },
-      4: { cellWidth: width * 0.22, halign: "center" },
-    },
-    styles: { ...base.styles, fontSize: 8.8 },
+    styles: { ...base.styles, fontSize: 8.2 },
   });
 
   footerNo(doc, pageNo);
 }
 
-/* ─────────────────────────────────────────────────────────────
-   ✅ 4페이지
-───────────────────────────────────────────────────────────── */
+/* ============================================================
+   ✅ 4페이지: 원단위 분석/종합 (전기 + 가스 있으면 상세 종합표)
+============================================================ */
 export function renderEnergyUnitIntensitySummaryPage(
   doc,
   { building, report, pageNo = 4, totalPages = 1, titleSuffix = "", __layout } = {},
 ) {
+  gotoLastPage(doc);
+
   const frame = __layout?.FRAME || DEFAULT_FRAME;
   const safe = __layout?.SAFE || DEFAULT_SAFE;
 
@@ -997,42 +1254,69 @@ export function renderEnergyUnitIntensitySummaryPage(
 
   const e = resolveEnergy(report, building, new Date().getFullYear());
   const base = baseTableStyle();
-
   const areaM2 = resolveAreaM2(building, report);
 
+  const hasGas = !!(e.gas1?.enabled || e.gas2?.enabled);
+
+  // ===== 전기 totals =====
   const totalKwh1 = e.kwh1 || e.monthlyKwh1.reduce((a, b) => a + N(b), 0);
   const totalKwh2 = e.kwh2 || e.monthlyKwh2.reduce((a, b) => a + N(b), 0);
   const totalWon1 = e.won1 || e.monthlyCost1.reduce((a, b) => a + N(b), 0);
   const totalWon2 = e.won2 || e.monthlyCost2.reduce((a, b) => a + N(b), 0);
 
-  const intensity1 = areaM2 > 0 ? totalKwh1 / areaM2 : 0;
-  const intensity2 = areaM2 > 0 ? totalKwh2 / areaM2 : 0;
-  const wonPerM21 = areaM2 > 0 ? totalWon1 / areaM2 : 0;
-  const wonPerM22 = areaM2 > 0 ? totalWon2 / areaM2 : 0;
-
-  const incIntensity = intensity1 > 0 ? ((intensity2 - intensity1) / intensity1) * 100 : 0;
-  const incWonPerM2 = wonPerM21 > 0 ? ((wonPerM22 - wonPerM21) / wonPerM21) * 100 : 0;
-
   const mwh1 = totalKwh1 / 1000;
   const mwh2 = totalKwh2 / 1000;
+
   const costM1 = totalWon1 / 1_000_000;
   const costM2 = totalWon2 / 1_000_000;
 
   const unitWonPerKwh1 = totalKwh1 > 0 ? totalWon1 / totalKwh1 : 0;
   const unitWonPerKwh2 = totalKwh2 > 0 ? totalWon2 / totalKwh2 : 0;
 
-  const incMwh = mwh1 > 0 ? ((mwh2 - mwh1) / mwh1) * 100 : 0;
-  const incCostM = costM1 > 0 ? ((costM2 - costM1) / costM1) * 100 : 0;
-  const incUnitWonPerKwh =
-    unitWonPerKwh1 > 0 ? ((unitWonPerKwh2 - unitWonPerKwh1) / unitWonPerKwh1) * 100 : 0;
+  // ===== 가스 totals =====
+  const gasUse1 = e.gas1?.enabled ? e.gas1.totalUse : 0; // Nm3/년
+  const gasUse2 = e.gas2?.enabled ? e.gas2.totalUse : 0;
 
-  const toe1 = mwh1 * GHG_RULES.toePerMwh;
-  const toe2 = mwh2 * GHG_RULES.toePerMwh;
-  const incToe = toe1 > 0 ? ((toe2 - toe1) / toe1) * 100 : 0;
+  const gasWon1 = e.gas1?.enabled ? (e.gas1.totalWon || 0) : 0;
+  const gasWon2 = e.gas2?.enabled ? (e.gas2.totalWon || 0) : 0;
 
-  const kgoePerM21 = areaM2 > 0 ? (toe1 * 1000) / areaM2 : 0;
-  const kgoePerM22 = areaM2 > 0 ? (toe2 * 1000) / areaM2 : 0;
-  const incKgoe = kgoePerM21 > 0 ? ((kgoePerM22 - kgoePerM21) / kgoePerM21) * 100 : 0;
+  const gasCostM1 = gasWon1 / 1_000_000;
+  const gasCostM2 = gasWon2 / 1_000_000;
+
+  const gasUnitWonPerNm31 = gasUse1 > 0 ? gasWon1 / gasUse1 : 0;
+  const gasUnitWonPerNm32 = gasUse2 > 0 ? gasWon2 / gasUse2 : 0;
+
+  // ===== 원단위(면적 기준) =====
+  const elecUsePerM21 = areaM2 > 0 ? totalKwh1 / areaM2 : 0; // kWh/m2
+  const elecUsePerM22 = areaM2 > 0 ? totalKwh2 / areaM2 : 0;
+
+  const elecWonPerM21 = areaM2 > 0 ? totalWon1 / areaM2 : 0; // 원/m2
+  const elecWonPerM22 = areaM2 > 0 ? totalWon2 / areaM2 : 0;
+
+  const gasUsePerM21 = areaM2 > 0 ? gasUse1 / areaM2 : 0; // Nm3/m2
+  const gasUsePerM22 = areaM2 > 0 ? gasUse2 / areaM2 : 0;
+
+  const gasWonPerM21 = areaM2 > 0 ? gasWon1 / areaM2 : 0;
+  const gasWonPerM22 = areaM2 > 0 ? gasWon2 / areaM2 : 0;
+
+  // ===== toe / kgoe =====
+  const toe1_e = mwh1 * GHG_RULES.toePerMwh;
+  const toe2_e = mwh2 * GHG_RULES.toePerMwh;
+
+  const toe1_g = gasUse1 * GAS_RULES.toePerNm3;
+  const toe2_g = gasUse2 * GAS_RULES.toePerNm3;
+
+  const toe1_sum = toe1_e + toe1_g;
+  const toe2_sum = toe2_e + toe2_g;
+
+  const kgoePerM21 = areaM2 > 0 ? (toe1_sum * 1000) / areaM2 : 0;
+  const kgoePerM22 = areaM2 > 0 ? (toe2_sum * 1000) / areaM2 : 0;
+
+  // ===== 증감율 =====
+  const pElecUse = pct(elecUsePerM21, elecUsePerM22);
+  const pElecWon = pct(elecWonPerM21, elecWonPerM22);
+  const pToeSum = pct(toe1_sum, toe2_sum);
+  const pKgoe = pct(kgoePerM21, kgoePerM22);
 
   let y = frame.T + 10;
 
@@ -1041,47 +1325,68 @@ export function renderEnergyUnitIntensitySummaryPage(
   doc.text("1) 2년간 에너지사용 원단위 분석", left + 1.5, y);
   y += 4;
 
-  const chartH = 58;
-  drawUnitComboChart(doc, {
+  // ✅ 그래프(원단위) - 전기 / (가스 있으면 가스도)
+  const chartW = width;
+  const chartH = hasGas ? 44 : 52;
+
+  if (hasGas) {
+    drawUnitComboChart2Years(doc, {
+      x: left,
+      y: y + 2,
+      w: chartW,
+      h: chartH,
+      title: `최근 2년간 LNG 원단위 분석`,
+      y1: e.y1,
+      y2: e.y2,
+      barUnit: "Nm³/㎡",
+      lineUnit: "원/㎡",
+      bar1: gasUsePerM21,
+      bar2: gasUsePerM22,
+      line1: gasWonPerM21,
+      line2: gasWonPerM22,
+    });
+    y += chartH + 8;
+  }
+
+  drawUnitComboChart2Years(doc, {
     x: left,
     y: y + 2,
-    w: width,
-    h: chartH,
-    title: "최근 2년간 전기 원단위 분석",
-    bar1: intensity1,
-    bar2: intensity2,
-    line1: wonPerM21,
-    line2: wonPerM22,
+    w: chartW,
+    h: hasGas ? 44 : 52,
+    title: `최근 2년간 전기 원단위 분석`,
     y1: e.y1,
     y2: e.y2,
+    barUnit: "kWh/㎡",
+    lineUnit: "원/㎡",
+    bar1: elecUsePerM21,
+    bar2: elecUsePerM22,
+    line1: elecWonPerM21,
+    line2: elecWonPerM22,
   });
-  y += chartH + 10;
+  y += (hasGas ? 44 : 52) + 8;
 
+  // ✅ 원단위 분석 표(요청한 형태)
   autoTable(doc, {
     ...base,
     startY: y,
     margin: { left: safe.L, right: safe.R },
     tableWidth: width,
-    head: [
-      [
-        { content: "구분", rowSpan: 2 },
-        { content: "단위", rowSpan: 2 },
-        { content: `${e.y1}` },
-        { content: `${e.y2}` },
-        { content: `비교(${e.y1}대비)`, rowSpan: 2 },
-      ],
-      ["", "", "", "", ""],
-    ],
+    pageBreak: "avoid",
+    rowPageBreak: "avoid",
+    head: [[{ content: "구분" }, { content: "단위" }, { content: `${e.y1}` }, { content: `${e.y2}` }, { content: `비고(${e.y1}대비)` }]],
     body: [
-      ["전력", "[kWh/㎡]", fmt2(intensity1), fmt2(intensity2), `${fmt2(incIntensity)} [%]`],
-      ["원단위", "[원/㎡]", fmtComma2(wonPerM21), fmtComma2(wonPerM22), `${fmt2(incWonPerM2)} [%]`],
+      ["전력 단위사용량", "[kWh/㎡]", fmt2(elecUsePerM21), fmt2(elecUsePerM22), fmtPct(pElecUse)],
+      ["전력 원단위", "[원/㎡]", fmtComma2(elecWonPerM21), fmtComma2(elecWonPerM22), fmtPct(pElecWon)],
+      ["석유환산톤(합계)", "[toe/년]", fmt2(toe1_sum), fmt2(toe2_sum), fmtPct(pToeSum)],
+      ["단위 석유환산톤(합계)", "[kgoe/㎡]", fmt2(kgoePerM21), fmt2(kgoePerM22), fmtPct(pKgoe)],
     ],
+    styles: { ...base.styles, fontSize: 9.0 },
     columnStyles: {
-      0: { cellWidth: width * 0.18, halign: "center" },
-      1: { cellWidth: width * 0.16, halign: "center" },
-      2: { cellWidth: width * 0.18, halign: "center" },
-      3: { cellWidth: width * 0.18, halign: "center" },
-      4: { cellWidth: width * 0.30, halign: "center" },
+      0: { cellWidth: width * 0.32 },
+      1: { cellWidth: width * 0.16 },
+      2: { cellWidth: width * 0.17 },
+      3: { cellWidth: width * 0.17 },
+      4: { cellWidth: width * 0.18 },
     },
   });
 
@@ -1092,32 +1397,180 @@ export function renderEnergyUnitIntensitySummaryPage(
   doc.text("아. 에너지 사용현황 종합", left + 1.5, y);
   y += 4;
 
-  autoTable(doc, {
-    ...base,
-    startY: y + 2,
-    margin: { left: safe.L, right: safe.R },
-    tableWidth: width,
-    head: [[{ content: "항목" }, { content: "단위" }, { content: `${e.y1}` }, { content: `${e.y2}` }, { content: `비교(${e.y1}대비)` }]],
-    body: [
-      ["건물 면적", "[㎡]", areaM2 ? fmtComma2(areaM2) : "—", areaM2 ? fmtComma2(areaM2) : "—", "—"],
-      ["사용량", "[MWh/년]", fmtComma(mwh1), fmtComma(mwh2), `${fmt2(incMwh)} [%]`],
-      ["요금", "[백만원/년]", fmtComma(costM1), fmtComma(costM2), `${fmt2(incCostM)} [%]`],
-      ["단가", "[원/kWh]", fmt2(unitWonPerKwh1), fmt2(unitWonPerKwh2), `${fmt2(incUnitWonPerKwh)} [%]`],
-      ["단위사용량", "[kWh/㎡]", fmt2(intensity1), fmt2(intensity2), `${fmt2(incIntensity)} [%]`],
-      ["원단위", "[원/㎡]", fmtComma2(wonPerM21), fmtComma2(wonPerM22), `${fmt2(incWonPerM2)} [%]`],
-      ["석유환산톤", "[toe/년]", fmt2(toe1), fmt2(toe2), `${fmt2(incToe)} [%]`],
-      ["단위 석유환산톤", "[kgoe/㎡]", fmt2(kgoePerM21), fmt2(kgoePerM22), `${fmt2(incKgoe)} [%]`],
-      ["단위 온실가스배출량", "[kgCO2eq/㎡]", "—", "—", "—"],
-    ],
-    columnStyles: {
-      0: { cellWidth: width * 0.26, halign: "center" },
-      1: { cellWidth: width * 0.18, halign: "center" },
-      2: { cellWidth: width * 0.18, halign: "center" },
-      3: { cellWidth: width * 0.18, halign: "center" },
-      4: { cellWidth: width * 0.20, halign: "center" },
-    },
-    styles: { ...base.styles, fontSize: 9.0 },
-  });
+  // ✅ 가스가 있으면: 5번째 스크린샷 스타일(상세 종합표)
+  if (hasGas) {
+    const body = [];
+
+    // 도시가스(LNG) 그룹 (rowSpan=5)
+    body.push(
+      [
+        { content: "도시가스(LNG)", rowSpan: 5, styles: { fillColor: COLOR.gas, fontStyle: "bold" } },
+        { content: "사용량", styles: { fillColor: COLOR.gas } },
+        "[Nm³/년]",
+        fmtComma2(gasUse1),
+        fmtComma2(gasUse2),
+        fmtPct(pct(gasUse1, gasUse2)),
+      ],
+      [
+        null,
+        { content: "요금", styles: { fillColor: COLOR.gas } },
+        "[백만원/년]",
+        fmtComma2(gasCostM1),
+        fmtComma2(gasCostM2),
+        fmtPct(pct(gasCostM1, gasCostM2)),
+      ],
+      [
+        null,
+        { content: "단가", styles: { fillColor: COLOR.gas } },
+        "[원/Nm³]",
+        fmt2(gasUnitWonPerNm31),
+        fmt2(gasUnitWonPerNm32),
+        fmtPct(pct(gasUnitWonPerNm31, gasUnitWonPerNm32)),
+      ],
+      [
+        null,
+        { content: "단위사용량", styles: { fillColor: COLOR.gas } },
+        "[Nm³/㎡]",
+        fmt2(gasUsePerM21),
+        fmt2(gasUsePerM22),
+        fmtPct(pct(gasUsePerM21, gasUsePerM22)),
+      ],
+      [
+        null,
+        { content: "원단위", styles: { fillColor: COLOR.gas } },
+        "[원/㎡]",
+        fmtComma2(gasWonPerM21),
+        fmtComma2(gasWonPerM22),
+        fmtPct(pct(gasWonPerM21, gasWonPerM22)),
+      ],
+    );
+
+    // 전력 그룹 (rowSpan=5)
+    body.push(
+      [
+        { content: "전력", rowSpan: 5, styles: { fillColor: COLOR.elec, fontStyle: "bold" } },
+        { content: "사용량", styles: { fillColor: COLOR.elec } },
+        "[MWh/년]",
+        fmtComma2(mwh1),
+        fmtComma2(mwh2),
+        fmtPct(pct(mwh1, mwh2)),
+      ],
+      [
+        null,
+        { content: "요금", styles: { fillColor: COLOR.elec } },
+        "[백만원/년]",
+        fmtComma2(costM1),
+        fmtComma2(costM2),
+        fmtPct(pct(costM1, costM2)),
+      ],
+      [
+        null,
+        { content: "단가", styles: { fillColor: COLOR.elec } },
+        "[원/kWh]",
+        fmt2(unitWonPerKwh1),
+        fmt2(unitWonPerKwh2),
+        fmtPct(pct(unitWonPerKwh1, unitWonPerKwh2)),
+      ],
+      [
+        null,
+        { content: "단위사용량", styles: { fillColor: COLOR.elec } },
+        "[kWh/㎡]",
+        fmt2(elecUsePerM21),
+        fmt2(elecUsePerM22),
+        fmtPct(pElecUse),
+      ],
+      [
+        null,
+        { content: "원단위", styles: { fillColor: COLOR.elec } },
+        "[원/㎡]",
+        fmtComma2(elecWonPerM21),
+        fmtComma2(elecWonPerM22),
+        fmtPct(pElecWon),
+      ],
+    );
+
+    // 석유환산톤 그룹 (rowSpan=3)
+    body.push(
+      [
+        { content: "석유환산톤", rowSpan: 3, styles: { fillColor: COLOR.note, fontStyle: "bold" } },
+        "도시가스(LNG)",
+        "[toe/년]",
+        fmt2(toe1_g),
+        fmt2(toe2_g),
+        fmtPct(pct(toe1_g, toe2_g)),
+      ],
+      [null, "전력", "[toe/년]", fmt2(toe1_e), fmt2(toe2_e), fmtPct(pct(toe1_e, toe2_e))],
+      [
+        null,
+        { content: "소계", styles: { fontStyle: "bold" } },
+        "[toe/년]",
+        { content: fmt2(toe1_sum), styles: { fontStyle: "bold" } },
+        { content: fmt2(toe2_sum), styles: { fontStyle: "bold" } },
+        fmtPct(pToeSum),
+      ],
+    );
+
+    // 단위 석유환산톤 (1행 강조)
+    body.push([
+      { content: "단위 석유환산톤", styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+      "",
+      "[kgoe/㎡]",
+      { content: fmt2(kgoePerM21), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+      { content: fmt2(kgoePerM22), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+      { content: fmtPct(pKgoe), styles: { fillColor: COLOR.sum, fontStyle: "bold" } },
+    ]);
+
+    autoTable(doc, {
+      ...base,
+      startY: y + 2,
+      margin: { left: safe.L, right: safe.R },
+      tableWidth: width,
+      pageBreak: "avoid",
+      rowPageBreak: "avoid",
+      head: [[{ content: "항목" }, { content: "세부" }, { content: "단위" }, { content: `${e.y1}` }, { content: `${e.y2}` }, { content: `비고(${e.y1}대비)` }]],
+      body,
+      didParseCell: (data) => {
+        if (data.section !== "body") return;
+        if (data.cell.raw == null) data.cell.text = [""];
+      },
+      styles: { ...base.styles, fontSize: 8.6 },
+      columnStyles: {
+        0: { cellWidth: width * 0.20 },
+        1: { cellWidth: width * 0.20 },
+        2: { cellWidth: width * 0.14 },
+        3: { cellWidth: width * 0.16 },
+        4: { cellWidth: width * 0.16 },
+        5: { cellWidth: width * 0.14 },
+      },
+    });
+  } else {
+    // ✅ 가스 없으면: 간단 종합표(기존 유지 + 컬러/폭만 안정화)
+    autoTable(doc, {
+      ...base,
+      startY: y + 2,
+      margin: { left: safe.L, right: safe.R },
+      tableWidth: width,
+      pageBreak: "avoid",
+      rowPageBreak: "avoid",
+      head: [[{ content: "항목" }, { content: "단위" }, { content: `${e.y1}` }, { content: `${e.y2}` }, { content: `비교(${e.y1}대비)` }]],
+      body: [
+        ["건물 면적", "[㎡]", areaM2 ? fmtComma2(areaM2) : "—", areaM2 ? fmtComma2(areaM2) : "—", "—"],
+        ["전력 사용량", "[MWh/년]", fmtComma(mwh1), fmtComma(mwh2), fmtPct(pct(mwh1, mwh2))],
+        ["전력 요금", "[백만원/년]", fmtComma(costM1), fmtComma(costM2), fmtPct(pct(costM1, costM2))],
+        ["전기 단가", "[원/kWh]", fmt2(unitWonPerKwh1), fmt2(unitWonPerKwh2), fmtPct(pct(unitWonPerKwh1, unitWonPerKwh2))],
+        ["석유환산톤(합계)", "[toe/년]", fmt2(toe1_sum), fmt2(toe2_sum), fmtPct(pToeSum)],
+        ["단위 석유환산톤(합계)", "[kgoe/㎡]", fmt2(kgoePerM21), fmt2(kgoePerM22), fmtPct(pKgoe)],
+      ],
+      styles: { ...base.styles, fontSize: 9.0 },
+      columnStyles: {
+        0: { cellWidth: width * 0.32 },
+        1: { cellWidth: width * 0.18 },
+        2: { cellWidth: width * 0.17 },
+        3: { cellWidth: width * 0.17 },
+        4: { cellWidth: width * 0.16 },
+      },
+    });
+  }
 
   footerNo(doc, pageNo);
 }

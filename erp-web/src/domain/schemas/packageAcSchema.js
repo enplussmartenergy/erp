@@ -42,7 +42,7 @@ export const packageAcSchema = {
       slots: [
         { id: "pk_maint_table", label: "유지 관리 점검표" },
         { id: "pk_outdoor_status", label: "실외기 외관/고정 상태" },
-        { id: "pk_indoor_status", label: "실내기 고정 상태" },
+        { id: "pk_indoor_status", label: "실내기 필터 점검" },
         { id: "pk_overheat_status", label: "과열차단기 작동상태" },
       ],
       // ✅ Form / buildPackageAcPdf에서 notes.pk_visual_note 사용
@@ -53,7 +53,7 @@ export const packageAcSchema = {
       id: "pk_measure",
       title: "패키지에어컨 측정 점검표",
       slots: [
-        { id: "pk_filter", label: "실내기 필터 점검" },
+        { id: "pk_filter", label: "실외기 가동 시 소음 측정" },
         { id: "pk_noise_meas", label: "실내기 가동 시 소음 측정" },
         { id: "pk_flow_meas", label: "실내기 풍량 측정" },
         { id: "pk_flow_graph", label: "풍량 조절 측정 결과" },

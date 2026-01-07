@@ -213,8 +213,10 @@ const YearBlock = React.memo(function YearBlock({
   const elec = cur?.electric || blankElectric();
   const gas = cur?.gas || blankGas();
 
-  const setElectric = (patch) => setYearDraft(year, { electric: { ...elec, ...patch } });
-  const setGas = (patch) => setYearDraft(year, { gas: { ...gas, ...patch } });
+  const setElectric = (patch) =>
+    setYearDraft(year, { electric: { ...elec, ...patch } });
+  const setGas = (patch) =>
+    setYearDraft(year, { gas: { ...gas, ...patch } });
 
   const toggleGas = () => {
     const nextEnabled = !gas.enabled;
@@ -229,7 +231,7 @@ const YearBlock = React.memo(function YearBlock({
   return (
     <Card title={`${year}년 에너지 사용/요금`}>
       <div css={hint} style={{ marginBottom: 10 }}>
-        월별 입력 → “합계/단가 계산”으로 연간 합계 자동 산출
+        월별 입력 → “합계/단가 계산”으로 연간 합계/단가/toe 자동 산출
       </div>
 
       <div
@@ -255,7 +257,9 @@ const YearBlock = React.memo(function YearBlock({
       <div style={{ fontWeight: 900, marginBottom: 8 }}>전기</div>
       <div css={grid2}>
         <div>
-          <div style={{ fontWeight: 900, marginBottom: 8 }}>월별 사용전력량 (kWh)</div>
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>
+            월별 사용전력량 (kWh)
+          </div>
           <div css={gridMonths}>
             {MONTHS.map((m, idx) => (
               <div key={`kwh-${year}-${m}`} css={row}>
@@ -270,13 +274,13 @@ const YearBlock = React.memo(function YearBlock({
                     isComposingRef.current = false;
                     const next = elec.monthlyKwh.slice();
                     next[idx] = e.currentTarget.value;
-                    setElectric({ monthlyKwh: next }); // ✅ 여기서 즉시 커밋됨(아래 setYearDraft)
+                    setElectric({ monthlyKwh: next });
                   }}
                   onChange={(e) => {
                     if (isComposingRef.current) return;
                     const next = elec.monthlyKwh.slice();
                     next[idx] = e.target.value;
-                    setElectric({ monthlyKwh: next }); // ✅ 여기서 즉시 커밋됨(아래 setYearDraft)
+                    setElectric({ monthlyKwh: next });
                   }}
                   onBlur={onBlurAny}
                   onKeyDown={onKeyDownAny}
@@ -287,7 +291,9 @@ const YearBlock = React.memo(function YearBlock({
         </div>
 
         <div>
-          <div style={{ fontWeight: 900, marginBottom: 8 }}>월별 전기요금 (원)</div>
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>
+            월별 전기요금 (원)
+          </div>
           <div css={gridMonths}>
             {MONTHS.map((m, idx) => (
               <div key={`ecost-${year}-${m}`} css={row}>
@@ -321,7 +327,14 @@ const YearBlock = React.memo(function YearBlock({
 
       {gas.enabled && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
             <div style={{ fontWeight: 900 }}>가스</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <div css={hint}>단위</div>
@@ -342,7 +355,9 @@ const YearBlock = React.memo(function YearBlock({
 
           <div css={grid2} style={{ marginTop: 10 }}>
             <div>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>월별 가스사용량 ({gas.unitLabel})</div>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                월별 가스사용량 ({gas.unitLabel})
+              </div>
               <div css={gridMonths}>
                 {MONTHS.map((m, idx) => (
                   <div key={`gasuse-${year}-${m}`} css={row}>
@@ -374,7 +389,9 @@ const YearBlock = React.memo(function YearBlock({
             </div>
 
             <div>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>월별 가스요금 (원)</div>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                월별 가스요금 (원)
+              </div>
               <div css={gridMonths}>
                 {MONTHS.map((m, idx) => (
                   <div key={`gascost-${year}-${m}`} css={row}>
@@ -426,7 +443,15 @@ const YearBlock = React.memo(function YearBlock({
           합계/단가 계산
         </button>
 
-        <div style={{ flex: 1, minWidth: 260, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 260,
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: 10,
+          }}
+        >
           <div>
             <div css={hint}>전기 연간 사용량(kWh)</div>
             <input css={input} value={elec.totalKwh ?? ""} readOnly />
@@ -443,7 +468,9 @@ const YearBlock = React.memo(function YearBlock({
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <div style={{ fontWeight: 900, marginBottom: 6 }}>{year}년 toe(전기 환산)</div>
+        <div style={{ fontWeight: 900, marginBottom: 6 }}>
+          {year}년 toe(전기 환산)
+        </div>
         <div css={hint} style={{ marginBottom: 6 }}>
           전기: 연간 사용량(kWh) 합계 × 0.229
         </div>
@@ -452,9 +479,11 @@ const YearBlock = React.memo(function YearBlock({
 
       {gas.enabled && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontWeight: 900, marginBottom: 6 }}>{year}년 가스 요약</div>
+          <div style={{ fontWeight: 900, marginBottom: 6 }}>
+            {year}년 가스 요약
+          </div>
           <div css={hint} style={{ marginBottom: 6 }}>
-            가스 toe 환산계수는 사업장/연료종류에 따라 달라서, 현재는 사용량/요금/단가까지만 자동 계산합니다.
+            ✅ 가스 toe = 연간사용량 × 1.0190 (사용량 단위가 Nm³일 때 기준)
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
@@ -473,7 +502,7 @@ const YearBlock = React.memo(function YearBlock({
           </div>
 
           <div style={{ marginTop: 10 }}>
-            <div css={hint}>가스 toe(추후)</div>
+            <div css={hint}>가스 toe</div>
             <input css={input} value={gas.toe ?? ""} readOnly />
           </div>
         </div>
@@ -484,7 +513,6 @@ const YearBlock = React.memo(function YearBlock({
 
 /* =========================
    ✅ Step
-   ✅ baseYear 기본: 현재년도 자동
 ========================= */
 export default function EnergyUsageStep({ value, onChange, baseYear }) {
   const effectiveBaseYear = baseYear ?? new Date().getFullYear(); // ✅ 2026 자동
@@ -518,10 +546,7 @@ export default function EnergyUsageStep({ value, onChange, baseYear }) {
   }, [onChange]);
 
   /**
-   * ✅ 핵심 수정:
-   * - 입력될 때마다 nextDraft를 만들어서 setDraft
-   * - IME 조합중이 아닐 때는 nextDraft를 부모에도 즉시 반영
-   *   => PDF 미리보기에서 "값이 안 들어감" 해결
+   * ✅ 입력 즉시 반영 (IME 제외)
    */
   const setYearDraft = useCallback(
     (year, patch) => {
@@ -544,6 +569,11 @@ export default function EnergyUsageStep({ value, onChange, baseYear }) {
     [y1, y2, effectiveBaseYear, onChange],
   );
 
+  /**
+   * ✅ 합계/단가/toe 계산
+   * - 전기 toe: kWh × 0.229
+   * - 가스 toe: 사용량 × 1.0190  (요청 규칙)
+   */
   const recalc = useCallback(
     (year) => {
       if (isComposingRef.current) return;
@@ -576,18 +606,30 @@ export default function EnergyUsageStep({ value, onChange, baseYear }) {
           const sumGasCost = gas.monthlyCost.reduce((a, b) => a + num(b), 0);
           const unitGas = sumUse > 0 ? sumGasCost / sumUse : 0;
 
+          // ✅ 가스 toe 규칙(요청): 연간사용량 × 1.0190
+          const toeGas = sumUse > 0 ? sumUse * 1.019 : 0;
+
           nextGas = {
             ...gas,
             totalUse: fmt0(sumUse),
             totalCost: fmt0(sumGasCost),
             unitCostWonPerUnit: sumUse > 0 ? unitGas.toFixed(2) : "0.00",
-            toe: gas.toe || "",
+            toe: sumUse > 0 ? toeGas.toFixed(2) : "0.00",
           };
         } else {
-          nextGas = { ...blankGas(), enabled: false, unitLabel: gas.unitLabel || "Nm³" };
+          nextGas = {
+            ...blankGas(),
+            enabled: false,
+            unitLabel: gas.unitLabel || "Nm³",
+          };
         }
 
-        next.years[String(year)] = { ...cur, electric: nextElectric, gas: nextGas };
+        next.years[String(year)] = {
+          ...cur,
+          electric: nextElectric,
+          gas: nextGas,
+        };
+
         computedNext = next;
         return next;
       });

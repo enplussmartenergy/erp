@@ -58,7 +58,7 @@ const toInt = (v) => {
 /**
  * equipments: EquipmentStep에서 저장한 그대로
  * [
- *   { key, label, owned, count, details:[{model,capacity,installYear,use,location,...}] }
+ *   { key, label, owned, count, details:[{ equipName, purpose, engineer, dateTxt, location, ...}] }
  * ]
  */
 function buildEquipmentRows(equipments = []) {
@@ -71,18 +71,23 @@ function buildEquipmentRows(equipments = []) {
     const effective = Array.from({ length: count }).map((_, i) => details[i] || {});
 
     effective.forEach((d, idx) => {
+      // ✅ 설비명 매핑: equipName 우선
       const name =
+        fmt(d?.equipName) ||
         fmt(d?.model) ||
         fmt(d?.name) ||
         `${fmt(eq.label || eq.key)} ${idx + 1}호기`;
 
-      // ✅ 너 UI 저장키가 use/location 이니까 그걸 우선
-      const purpose = fmt(d?.use || d?.purpose || "");
+      // ✅ 용도 매핑: purpose 우선(레거시 use도 허용)
+      const purpose = fmt(d?.purpose || d?.use || "");
+
+      // ✅ 설치위치
       const location = fmt(d?.location || "");
 
       const qty = "1";
 
       if (idx === 0) {
+        // 첫 줄: 설비구분 셀 rowSpan
         rows.push([
           {
             content: fmt(eq.label || eq.key),
@@ -95,8 +100,9 @@ function buildEquipmentRows(equipments = []) {
           { content: location, styles: { halign: "center" } },
         ]);
       } else {
+        // ✅ 핵심 수정:
+        // rowSpan 이어지는 줄은 "설비 구분" 컬럼 셀을 넣으면 안 됨(placeholder 금지)
         rows.push([
-          { content: "" }, // rowSpan 이어지는 자리
           { content: name, styles: { halign: "center" } },
           { content: purpose, styles: { halign: "center" } },
           { content: qty, styles: { halign: "center" } },
@@ -114,22 +120,16 @@ function buildEquipmentRows(equipments = []) {
 /* ───────── 메인: 다. 점검 설비 현황 페이지 ───────── */
 export function renderEquipmentStatusPage(
   doc,
-  { equipments = [], pageNo = 1, totalPages = 1, titleSuffix = "" } = {},
+  { equipments = [], pageNo = 1, totalPages = 1, titleSuffix = "" } = {}
 ) {
   setKR(doc);
 
-  // ✅ 건물현황 페이지처럼 프레임은 FRAME, 내용은 SAFE 기준
   pageChrome(
     doc,
     `다. 점검 설비 현황${titleSuffix ? ` ${titleSuffix}` : ""}`,
     FRAME,
-    totalPages ? `페이지 ${pageNo}/${totalPages}` : "",
+    totalPages ? `페이지 ${pageNo}/${totalPages}` : ""
   );
-
-  const W = doc.internal.pageSize.getWidth();
-  const left = SAFE.L;
-  const right = W - SAFE.R;
-  const width = right - left;
 
   const base = {
     theme: "grid",
@@ -154,7 +154,6 @@ export function renderEquipmentStatusPage(
 
   const body = buildEquipmentRows(equipments);
 
-  // ✅ startY도 SAFE 기준으로 좀 안쪽에서 시작
   const y = FRAME.T + 8;
 
   autoTable(doc, {
